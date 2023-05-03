@@ -307,7 +307,7 @@ public:
         selectedBvhClipIdx = -1;
         selectedC3dClipIdx = -1;
         frameIdx = 0;
-
+        processAllBVHClip();
         crl::Logger::consolePrint("Imported %d clips.\n", cnt);
     }
 
@@ -331,7 +331,7 @@ private:
 
         footSteps.clear();
         // footMarkerNames = {"LeftHand", "LeftFoot", "RightHand", "RightFoot"};
-        footMarkerNames = {"LeftHand", "LeftToe", "RightHand", "RightToe"};
+        footMarkerNames = {"LeftToe", "RightToe"};
         linkNames = {};
         virtualLinkNames = {};
 
@@ -415,6 +415,93 @@ private:
             auto contactInfos = crl::mocap::extractFootContactStateFromBVHClip(  //
                 bvhClips[selectedBvhClipIdx].get(), name, footHeightThreshold, footVelocityThreshold);
             footSteps[name] = crl::mocap::convertFootSwingSequenceFromFootContactStates(contactInfos);
+        }
+    }
+
+    void processAllBVHClip() {
+        // if (selectedBvhClipIdx == -1)
+        //     return;
+
+        // extracting foot velocity and position
+        DBtotalFrame = 0;
+        for (uint bvhidx = 0; bvhidx < bvhClips.size(); bvhidx++)
+        {
+            DBtotalFrame += bvhClips[bvhidx]->getFrameCount();
+        }
+        std::vector<std::string> DBmarkerNames = {"LeftFoot", "RightFoot", "Hips"};
+        DBMatching.setZero(DBtotalFrame, DBfeatVecDim);
+        int counter = 0;
+        
+        for (uint bvhidx = 0; bvhidx < bvhClips.size(); bvhidx++)
+        {
+            int clipFrameNum = bvhClips[bvhidx]->getFrameCount();
+
+            Eigen::MatrixXd footJointPos;
+            footJointPos.setZero(clipFrameNum, 6);
+            Eigen::MatrixXd footJointVel;
+            footJointPos.setZero(clipFrameNum, 6);
+            Eigen::MatrixXd hipJointVel;
+            footJointPos.setZero(clipFrameNum, 3);
+            Eigen::MatrixXd trajPoseonGround;
+            footJointPos.setZero(clipFrameNum, 2);
+            Eigen::MatrixXd trajDirection;
+            footJointPos.setZero(clipFrameNum, 2);
+
+            auto *sk = bvhClips[bvhidx]->getModel();
+
+            for (int i = 0; i < clipFrameNum; i++) {
+                sk->setState(&bvhClips[bvhidx]->getState(i));
+
+                for (int j = 0; j < DBmarkerNames.size(); j++) {
+                    const auto &name = DBmarkerNames[j];
+                    std::cout << name << std::endl;
+                    if (const auto joint = sk->getMarkerByName(name.c_str())) {                        
+                        crl::P3D eepos = joint->state.getWorldCoordinates(joint->endSites[0].endSiteOffset);
+                        crl::V3D eevel = joint->state.getVelocityForPoint_local(joint->endSites[0].endSiteOffset);
+                        if (j == 0) // left foot
+                        {
+                            footJointPos(i, 0) = eepos.x;
+                            footJointPos(i, 1) = eepos.y;
+                            footJointPos(i, 2) = eepos.z;
+                            footJointVel(i, 0) = eevel.x();
+                            footJointVel(i, 1) = eevel.y();
+                            footJointVel(i, 2) = eevel.z();
+                        }
+                        else if (j == 1)    // right foot
+                        {
+                            footJointPos(i, 3) = eepos.x;
+                            footJointPos(i, 4) = eepos.y;
+                            footJointPos(i, 5) = eepos.z;
+                            footJointVel(i, 3) = eevel.x();
+                            footJointVel(i, 4) = eevel.y();
+                            footJointVel(i, 5) = eevel.z();
+                        }
+                        else if (j == 2)    //hip
+                        {
+                            hipJointVel(i, 0) = eevel.x();
+                            hipJointVel(i, 1) = eevel.y();
+                            hipJointVel(i, 2) = eevel.z();
+                        }
+                    }
+                }
+                trajPoseonGround(i, 0) = (footJointPos(i, 0) + footJointPos(i, 3)) / 2;
+                trajPoseonGround(i, 1) = (footJointPos(i, 2) + footJointPos(i, 5)) / 2;
+            }
+            trajDirection.block(0, 0, clipFrameNum - 1, 2) = trajPoseonGround.block(1, 0, clipFrameNum - 1, 2) - trajPoseonGround.block(0, 0, clipFrameNum - 1, 2);
+            trajDirection.rowwise().normalize();
+            // last row of trajectory direction: how to set???
+            // add future trajectory position
+            DBMatching.block(counter, 0, clipFrameNum - 20, 2) = trajPoseonGround.block(20, 0, clipFrameNum - 20, 2); // 60Hz ??
+            DBMatching.block(counter, 2, clipFrameNum - 40, 2) = trajPoseonGround.block(40, 0, clipFrameNum - 40, 2); // 60Hz ??
+            DBMatching.block(counter, 4, clipFrameNum - 60, 2) = trajPoseonGround.block(60, 0, clipFrameNum - 60, 2); // 60Hz ??
+            // add future trajectory facing direction
+            DBMatching.block(counter, 6, clipFrameNum - 20, 2) = trajDirection.block(20, 0, clipFrameNum - 20, 2); // 60Hz ??
+            DBMatching.block(counter, 8, clipFrameNum - 40, 2) = trajDirection.block(40, 0, clipFrameNum - 40, 2); // 60Hz ??
+            DBMatching.block(counter, 10, clipFrameNum - 60, 2) = trajDirection.block(60, 0, clipFrameNum - 60, 2); // 60Hz ??
+            DBMatching.block(counter, 12, clipFrameNum, 6) = footJointPos; // 60Hz ??
+            DBMatching.block(counter, 18, clipFrameNum, 6) = footJointVel; // 60Hz ??
+            DBMatching.block(counter, 24, clipFrameNum, 3) = hipJointVel; // 60Hz ??
+            counter += clipFrameNum;
         }
     }
 
@@ -594,6 +681,10 @@ private:
     crl::mocap::PlotLine2D<crl::dVector> feetVelocityPlot;
     crl::mocap::PlotLine2D<crl::dVector> feetAccelerationPlot;
     crl::mocap::Timeline swingTimeline;
+
+    int DBtotalFrame = 0;
+    Eigen::MatrixXd DBMatching;
+    int DBfeatVecDim = 27; // ?
 };
 
 }  // namespace mocapApp
