@@ -428,7 +428,7 @@ private:
         {
             DBtotalFrame += bvhClips[bvhidx]->getFrameCount();
         }
-        std::vector<std::string> DBmarkerNames = {"LeftToe", "RightToe", "Hips"};
+        std::vector<std::string> DBmarkerNames = {"LeftFoot", "RightFoot", "Hips"};
         DBMatching.setZero(DBtotalFrame, DBfeatVecDim);
         Feature_mean.setZero(DBfeatVecDim);
         Feature_std.setZero(DBfeatVecDim);
@@ -458,10 +458,10 @@ private:
                 for (int j = 0; j < DBmarkerNames.size(); j++) {
                     const auto &name = DBmarkerNames[j];
                     if (const auto joint = sk->getMarkerByName(name.c_str())) {
+                        crl::P3D eepos = joint->state.pos;
+                        crl::V3D eevel = joint->state.velocity;
                         if (j == 0) // left Toe
                         {
-                            crl::P3D eepos = joint->state.getWorldCoordinates(joint->endSites[0].endSiteOffset);
-                            crl::V3D eevel = joint->state.getVelocityForPoint_local(joint->endSites[0].endSiteOffset);
                             footJointPos(i, 0) = eepos.x;
                             footJointPos(i, 1) = eepos.y;
                             footJointPos(i, 2) = eepos.z;
@@ -471,8 +471,6 @@ private:
                         }
                         else if (j == 1)    // right Toe
                         {
-                            crl::P3D eepos = joint->state.getWorldCoordinates(joint->endSites[0].endSiteOffset);
-                            crl::V3D eevel = joint->state.getVelocityForPoint_local(joint->endSites[0].endSiteOffset);
                             footJointPos(i, 3) = eepos.x;
                             footJointPos(i, 4) = eepos.y;
                             footJointPos(i, 5) = eepos.z;
@@ -482,8 +480,6 @@ private:
                         }
                         else if (j == 2)   // HIP
                         {
-                            crl::P3D eepos = joint->state.pos;
-                            crl::V3D eevel = joint->state.velocity;
                             hipJointVel(i, 0) = eevel.x();
                             hipJointVel(i, 1) = eevel.y();
                             hipJointVel(i, 2) = eevel.z();
@@ -514,7 +510,7 @@ private:
         }
 
         for (int i=0; i<DBMatching.cols(); i++){
-            Eigen::VectorXd col = DBMatching.col(i);  // Extract second column as a vector
+            Eigen::VectorXd col = DBMatching.col(i);
             double mean = col.mean();          // Compute mean
             double std = (col.array() - mean).square().mean();  // Compute variance
             std = std > 0 ? sqrt(std) : 0;     // Compute standard deviation from variance
