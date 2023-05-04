@@ -523,6 +523,7 @@ private:
 
     int MMSearchforIndex(Eigen::RowVectorXd& inputFeatureQuery)
     {
+        Eigen::RowVectorXd normalizedQuery = (inputFeatureQuery.array() - Feature_mean.array()) / Feature_std.array();
         Eigen::VectorXd norms = (DBMatching.rowwise() - inputFeatureQuery).rowwise().norm();
         int index;
         double minnorm = norms.minCoeff(&index);
