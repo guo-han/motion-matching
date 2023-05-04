@@ -430,6 +430,9 @@ private:
         }
         std::vector<std::string> DBmarkerNames = {"LeftToe", "RightToe", "Hips"};
         DBMatching.setZero(DBtotalFrame, DBfeatVecDim);
+        Feature_mean.setZero(1, DBfeatVecDim);
+        Feature_std.setZero(1, DBfeatVecDim);
+
         int counter = 0;
         
         for (uint bvhidx = 0; bvhidx < bvhClips.size(); bvhidx++)
@@ -508,6 +511,13 @@ private:
             DBMatching.block(counter, 18, clipFrameNum, 6) = footJointVel;
             DBMatching.block(counter, 24, clipFrameNum, 3) = hipJointVel;
             counter += clipFrameNum;
+        }
+
+        for (int i=0; i<DBMatching.cols(); i++){
+            Eigen::VectorXd col = DBMatching.col(i);  // Extract second column as a vector
+            double mean = col.mean();          // Compute mean
+            double std = (col.array() - mean).square().mean();  // Compute variance
+            std = std > 0 ? sqrt(std) : 0;     // Compute standard deviation from variance
         }
     }
 
@@ -698,6 +708,8 @@ private:
 
     int DBtotalFrame = 0;
     Eigen::MatrixXd DBMatching;
+    Eigen::VectorXd Feature_mean;
+    Eigen::VectorXd Feature_std;
     int DBfeatVecDim = 27; // ?
 };
 
