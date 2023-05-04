@@ -511,6 +511,14 @@ private:
         }
     }
 
+    int MMSearchforIndex(Eigen::RowVectorXd& inputFeatureQuery)
+    {
+        Eigen::VectorXd norms = (DBMatching.rowwise() - inputFeatureQuery).rowwise().norm();
+        int index;
+        double minnorm = norms.minCoeff(&index);
+        return index;
+    }
+
     void processC3DClip() {
         if (selectedC3dClipIdx == -1)
             return;
