@@ -430,8 +430,8 @@ private:
         }
         std::vector<std::string> DBmarkerNames = {"LeftToe", "RightToe", "Hips"};
         DBMatching.setZero(DBtotalFrame, DBfeatVecDim);
-        Feature_mean.setZero(1, DBfeatVecDim);
-        Feature_std.setZero(1, DBfeatVecDim);
+        Feature_mean.setZero(DBfeatVecDim);
+        Feature_std.setZero(DBfeatVecDim);
 
         int counter = 0;
         
@@ -518,6 +518,10 @@ private:
             double mean = col.mean();          // Compute mean
             double std = (col.array() - mean).square().mean();  // Compute variance
             std = std > 0 ? sqrt(std) : 0;     // Compute standard deviation from variance
+            
+            DBMatching.col(i) = (DBMatching.col(i).array() - mean) / std;
+            Feature_mean[i] = mean;
+            Feature_std[i] = std;
         }
     }
 
