@@ -428,7 +428,7 @@ private:
         {
             DBtotalFrame += bvhClips[bvhidx]->getFrameCount();
         }
-        std::vector<std::string> DBmarkerNames = {"LeftFoot", "RightFoot", "Hips"};
+        std::vector<std::string> DBmarkerNames = {"LeftToe", "RightToe", "Hips"};
         DBMatching.setZero(DBtotalFrame, DBfeatVecDim);
         int counter = 0;
         
@@ -439,13 +439,13 @@ private:
             Eigen::MatrixXd footJointPos;
             footJointPos.setZero(clipFrameNum, 6);
             Eigen::MatrixXd footJointVel;
-            footJointPos.setZero(clipFrameNum, 6);
+            footJointVel.setZero(clipFrameNum, 6);
             Eigen::MatrixXd hipJointVel;
-            footJointPos.setZero(clipFrameNum, 3);
+            hipJointVel.setZero(clipFrameNum, 3);
             Eigen::MatrixXd trajPoseonGround;
-            footJointPos.setZero(clipFrameNum, 2);
+            trajPoseonGround.setZero(clipFrameNum, 2);
             Eigen::MatrixXd trajDirection;
-            footJointPos.setZero(clipFrameNum, 2);
+            trajDirection.setZero(clipFrameNum, 2);
 
             auto *sk = bvhClips[bvhidx]->getModel();
 
@@ -454,12 +454,11 @@ private:
 
                 for (int j = 0; j < DBmarkerNames.size(); j++) {
                     const auto &name = DBmarkerNames[j];
-                    std::cout << name << std::endl;
-                    if (const auto joint = sk->getMarkerByName(name.c_str())) {                        
-                        crl::P3D eepos = joint->state.getWorldCoordinates(joint->endSites[0].endSiteOffset);
-                        crl::V3D eevel = joint->state.getVelocityForPoint_local(joint->endSites[0].endSiteOffset);
-                        if (j == 0) // left foot
+                    if (const auto joint = sk->getMarkerByName(name.c_str())) {
+                        if (j == 0) // left Toe
                         {
+                            crl::P3D eepos = joint->state.getWorldCoordinates(joint->endSites[0].endSiteOffset);
+                            crl::V3D eevel = joint->state.getVelocityForPoint_local(joint->endSites[0].endSiteOffset);
                             footJointPos(i, 0) = eepos.x;
                             footJointPos(i, 1) = eepos.y;
                             footJointPos(i, 2) = eepos.z;
@@ -467,8 +466,10 @@ private:
                             footJointVel(i, 1) = eevel.y();
                             footJointVel(i, 2) = eevel.z();
                         }
-                        else if (j == 1)    // right foot
+                        else if (j == 1)    // right Toe
                         {
+                            crl::P3D eepos = joint->state.getWorldCoordinates(joint->endSites[0].endSiteOffset);
+                            crl::V3D eevel = joint->state.getVelocityForPoint_local(joint->endSites[0].endSiteOffset);
                             footJointPos(i, 3) = eepos.x;
                             footJointPos(i, 4) = eepos.y;
                             footJointPos(i, 5) = eepos.z;
@@ -476,8 +477,10 @@ private:
                             footJointVel(i, 4) = eevel.y();
                             footJointVel(i, 5) = eevel.z();
                         }
-                        else if (j == 2)    //hip
+                        else if (j == 2)   // HIP
                         {
+                            crl::P3D eepos = joint->state.pos;
+                            crl::V3D eevel = joint->state.velocity;
                             hipJointVel(i, 0) = eevel.x();
                             hipJointVel(i, 1) = eevel.y();
                             hipJointVel(i, 2) = eevel.z();
@@ -487,20 +490,23 @@ private:
                 trajPoseonGround(i, 0) = (footJointPos(i, 0) + footJointPos(i, 3)) / 2;
                 trajPoseonGround(i, 1) = (footJointPos(i, 2) + footJointPos(i, 5)) / 2;
             }
+            // compute traj facing direction for every frame
             trajDirection.block(0, 0, clipFrameNum - 1, 2) = trajPoseonGround.block(1, 0, clipFrameNum - 1, 2) - trajPoseonGround.block(0, 0, clipFrameNum - 1, 2);
+            trajDirection.row(clipFrameNum - 1) = trajDirection.row(clipFrameNum - 2); // set the last frame
             trajDirection.rowwise().normalize();
-            // last row of trajectory direction: how to set???
+
+            // defined for 30Hz, stores the future 10\20\30 frames
             // add future trajectory position
-            DBMatching.block(counter, 0, clipFrameNum - 20, 2) = trajPoseonGround.block(20, 0, clipFrameNum - 20, 2); // 60Hz ??
-            DBMatching.block(counter, 2, clipFrameNum - 40, 2) = trajPoseonGround.block(40, 0, clipFrameNum - 40, 2); // 60Hz ??
-            DBMatching.block(counter, 4, clipFrameNum - 60, 2) = trajPoseonGround.block(60, 0, clipFrameNum - 60, 2); // 60Hz ??
+            DBMatching.block(counter, 0, clipFrameNum - 10, 2) = trajPoseonGround.block(10, 0, clipFrameNum - 10, 2); 
+            DBMatching.block(counter, 2, clipFrameNum - 20, 2) = trajPoseonGround.block(20, 0, clipFrameNum - 20, 2); 
+            DBMatching.block(counter, 4, clipFrameNum - 30, 2) = trajPoseonGround.block(30, 0, clipFrameNum - 30, 2); 
             // add future trajectory facing direction
-            DBMatching.block(counter, 6, clipFrameNum - 20, 2) = trajDirection.block(20, 0, clipFrameNum - 20, 2); // 60Hz ??
-            DBMatching.block(counter, 8, clipFrameNum - 40, 2) = trajDirection.block(40, 0, clipFrameNum - 40, 2); // 60Hz ??
-            DBMatching.block(counter, 10, clipFrameNum - 60, 2) = trajDirection.block(60, 0, clipFrameNum - 60, 2); // 60Hz ??
-            DBMatching.block(counter, 12, clipFrameNum, 6) = footJointPos; // 60Hz ??
-            DBMatching.block(counter, 18, clipFrameNum, 6) = footJointVel; // 60Hz ??
-            DBMatching.block(counter, 24, clipFrameNum, 3) = hipJointVel; // 60Hz ??
+            DBMatching.block(counter, 6, clipFrameNum - 10, 2) = trajDirection.block(10, 0, clipFrameNum - 10, 2); 
+            DBMatching.block(counter, 8, clipFrameNum - 20, 2) = trajDirection.block(20, 0, clipFrameNum - 20, 2); 
+            DBMatching.block(counter, 10, clipFrameNum - 30, 2) = trajDirection.block(30, 0, clipFrameNum - 30, 2); 
+            DBMatching.block(counter, 12, clipFrameNum, 6) = footJointPos;
+            DBMatching.block(counter, 18, clipFrameNum, 6) = footJointVel;
+            DBMatching.block(counter, 24, clipFrameNum, 3) = hipJointVel;
             counter += clipFrameNum;
         }
     }
