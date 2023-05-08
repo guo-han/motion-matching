@@ -238,6 +238,7 @@ void Application::run() {
 
     while (!glfwWindowShouldClose(window)) {
         if (FPSDisplayTimer.timeEllapsed() > 0.33) {
+            controller.run(window);
             FPSDisplayTimer.restart();
             if (runningAverageStepCount > 0) {
                 averageFPS = 1.0 / (tmpEntireLoopTimeRunningAverage / runningAverageStepCount);

@@ -16,8 +16,8 @@
 #include <imgui_widgets/imGuIZMOquat.h>
 #include <imgui_widgets/imgui_add.h>
 #include <imgui_widgets/implot.h>
-
 #include <thread>
+#include "crl-basic/gui/Controller.h"
 
 namespace crl {
 namespace gui {
@@ -100,6 +100,8 @@ public:
     bool screenIsRecording = false;
     int screenShotCounter = 0;
     std::string screenshotPath = CRL_DATA_FOLDER "/out/screenshots";
+
+    crl::mocap::Controller controller;
 };
 
 //-----------------------------------------------------------------------------------------------------------------------------------------------------------------
