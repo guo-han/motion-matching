@@ -3,6 +3,7 @@
 #include <crl-basic/gui/application.h>
 #include <imgui_widgets/imfilebrowser.h>
 
+#include "crl-basic/gui/guiMath.h"
 #include "mocap/MocapClip.h"
 #include "mocap/MocapClipUtils.h"
 #include "mocap/MocapMarkers.h"
@@ -93,8 +94,21 @@ public:
     }
 
     void drawObjectsWithoutShadows(const crl::gui::Shader &shader) override {
-        if (selectedBvhClipIdx > -1)
+        if (selectedBvhClipIdx > -1){
             bvhClips[selectedBvhClipIdx]->draw(shader, frameIdx);
+            if (showTrajectory){
+                // int fut_frame_num = bvhClips[selectedBvhClipIdx]->getFrameCount() - frameIdx;
+                int fut_frame_num = 120;
+                int DBindex = Frame_indexes[selectedBvhClipIdx][frameIdx];
+                
+                Eigen::MatrixXd future_pose = DBMatching.block(DBindex,12,fut_frame_num,6);
+                Eigen::MatrixXd future_vel = DBMatching.block(DBindex,18,fut_frame_num,6);
+                Eigen::MatrixXd future_traj = DBMatching.block(DBindex,0,fut_frame_num,6);
+                // crl::gui::drawSphere(bvhClips[selectedBvhClipIdx]->getModel()->getMarkerByName(footMarkerNames[1].c_str())->state.pos,  //
+                //                              0.05, shader, crl::V3D(0, 1, 0), 0.5);
+                drawTrajectory(shader, future_pose, future_vel, future_traj);
+            }
+        }
         if (selectedC3dClipIdx > -1) {
             c3dClips[selectedC3dClipIdx]->draw(shader, frameIdx);
 
@@ -155,6 +169,47 @@ public:
                 crl::gui::drawSphere(c3dClips[selectedC3dClipIdx]->getModel()->getMarker(selectedMarkerIdx)->state.pos, 0.05, shader, crl::V3D(1, 0, 0), 0.5);
         }
     }
+
+    void drawTrajectory(const crl::gui::Shader &shader, const Eigen::MatrixXd &future_pose, const Eigen::MatrixXd &future_vel, const Eigen::MatrixXd &future_traj) override {
+        int future_dim = future_pose.rows(); 
+        if (future_pose.rows() != future_vel.rows()){
+            std::cout << "future pose and velocity have different length" << std::endl;
+            future_dim = (future_pose.rows()<future_vel.rows())? future_pose.rows() : future_vel.rows();
+        } 
+        for (int i=0; i<future_dim; i+=40){
+            // left foot
+            crl::P3D pose = crl::P3D(future_pose(i,0),future_pose(i,1),future_pose(i,2));
+            crl::V3D vel = crl::V3D(future_vel(i,0),future_vel(i,1),future_vel(i,2)).normalized() *0.1;
+            crl::gui::drawSphere(pose, 0.025, shader, Eigen::Vector3d(1, 0, 0), 1.0);
+            // crl::gui::drawArrow3d(pose, vel, 0.01, shader, Eigen::Vector3d(1, 0, 0), 1.0);
+
+            // right foot
+            pose = crl::P3D(future_pose(i,3),future_pose(i,4),future_pose(i,5));
+            vel = crl::V3D(future_vel(i,3),future_vel(i,4),future_vel(i,5)).normalized() *0.1;
+            crl::gui::drawSphere(pose, 0.025, shader, Eigen::Vector3d(0, 1, 0), 1.0);
+            // crl::gui::drawArrow3d(pose, vel, 0.01, shader, Eigen::Vector3d(0, 1, 0), 1.0);
+
+            // trajectory
+            crl::P3D start = crl::P3D(pose[0],0,pose[2]);
+            crl::P3D end = crl::P3D(future_traj(i,0),0,future_traj(i,1));
+            crl::V3D dir = crl::V3D(start, end).normalized() * 0.5;
+            // crl::gui::drawSphere(end, 0.05, shader, Eigen::Vector3d(0, 0, 1), 1.0);
+            crl::gui::drawArrow3d(end, dir, 0.05, shader, Eigen::Vector3d(0, 0, 1), 1.0);
+
+            // start = crl::P3D(future_traj(i,0),0,future_traj(i,1));
+            // end = crl::P3D(future_traj(i,2),0,future_traj(i,3));
+            // dir = crl::V3D(start, end).normalized() *0.5;
+            // // crl::gui::drawSphere(end, 0.05, shader, Eigen::Vector3d(0, 0, 1), 1.0);
+            // crl::gui::drawArrow3d(end, dir, 0.05, shader, Eigen::Vector3d(0, 0, 1), 1.0);
+
+            // start = crl::P3D(future_traj(i,2),0,future_traj(i,3));
+            // end = crl::P3D(future_traj(i,4),0,future_traj(i,5));
+            // dir = crl::V3D(start, end).normalized() *0.5;
+            // // crl::gui::drawSphere(end, 0.05, shader, Eigen::Vector3d(0, 0, 1), 1.0);
+            // crl::gui::drawArrow3d(end, dir, 0.05, shader, Eigen::Vector3d(0, 0, 1), 1.0);
+        }
+    }
+
 
     void drawPlots() {
         if (selectedBvhClipIdx == -1 && selectedC3dClipIdx == -1)
@@ -255,6 +310,8 @@ public:
             ImGui::Checkbox("Show Coordinate Frames", &showCoordinateFrames);
             ImGui::Checkbox("Show Virtual Limb", &showVirtualLimbs);
             ImGui::Checkbox("Show Contact State", &showContactState);
+            ImGui::Checkbox("Show Future Trajectory", &showTrajectory);
+            ImGui::Checkbox("Start Recording", &screenIsRecording);
         }
 
         ImGui::End();
@@ -424,9 +481,12 @@ private:
 
         // extracting foot velocity and position
         DBtotalFrame = 0;
+        Frame_indexes.resize(bvhClips.size());
         for (uint bvhidx = 0; bvhidx < bvhClips.size(); bvhidx++)
         {
-            DBtotalFrame += bvhClips[bvhidx]->getFrameCount();
+            int frame_num = bvhClips[bvhidx]->getFrameCount();
+            DBtotalFrame += frame_num;
+            Frame_indexes[bvhidx].resize(frame_num);
         }
         std::vector<std::string> DBmarkerNames = {"LeftFoot", "RightFoot", "Hips"};
         DBMatching.setZero(DBtotalFrame, DBfeatVecDim);
@@ -434,6 +494,7 @@ private:
         Feature_std.setZero(DBfeatVecDim);
 
         int counter = 0;
+        int index_counter = 0;
         
         for (uint bvhidx = 0; bvhidx < bvhClips.size(); bvhidx++)
         {
@@ -453,6 +514,10 @@ private:
             auto *sk = bvhClips[bvhidx]->getModel();
 
             for (int i = 0; i < clipFrameNum; i++) {
+                // store index in DBMatching
+                Frame_indexes[bvhidx][i] = index_counter;
+                index_counter++;
+
                 sk->setState(&bvhClips[bvhidx]->getState(i));
 
                 for (int j = 0; j < DBmarkerNames.size(); j++) {
@@ -460,7 +525,7 @@ private:
                     if (const auto joint = sk->getMarkerByName(name.c_str())) {
                         crl::P3D eepos = joint->state.pos;
                         crl::V3D eevel = joint->state.velocity;
-                        if (j == 0) // left Toe
+                        if (j == 0) // left Foot
                         {
                             footJointPos(i, 0) = eepos.x;
                             footJointPos(i, 1) = eepos.y;
@@ -469,7 +534,7 @@ private:
                             footJointVel(i, 1) = eevel.y();
                             footJointVel(i, 2) = eevel.z();
                         }
-                        else if (j == 1)    // right Toe
+                        else if (j == 1)    // right Foot
                         {
                             footJointPos(i, 3) = eepos.x;
                             footJointPos(i, 4) = eepos.y;
@@ -515,7 +580,7 @@ private:
             double std = (col.array() - mean).square().mean();  // Compute variance
             std = std > 0 ? sqrt(std) : 0;     // Compute standard deviation from variance
             
-            DBMatching.col(i) = (DBMatching.col(i).array() - mean) / std;
+            // DBMatching.col(i) = (DBMatching.col(i).array() - mean) / std;
             Feature_mean[i] = mean;
             Feature_std[i] = std;
         }
@@ -700,6 +765,7 @@ private:
     bool showCoordinateFrames = false;
     bool showVirtualLimbs = true;
     bool showContactState = false;
+    bool showTrajectory = false;
     crl::mocap::PlotLine2D<crl::P3D> baseHeightPlot;
     crl::mocap::PlotLine2D<crl::dVector> baseSpeedPlot;
     crl::mocap::PlotLine2D<crl::dVector> feetHeightPlot;
@@ -711,6 +777,7 @@ private:
     Eigen::MatrixXd DBMatching;
     Eigen::VectorXd Feature_mean;
     Eigen::VectorXd Feature_std;
+    std::vector<std::vector<int>> Frame_indexes; // #N_clips * #n_frames, find the indexes in DBMatching for each frame in each clip
     int DBfeatVecDim = 27; // ?
 };
 

@@ -115,7 +115,9 @@ public:
     virtual void drawShadowCastingObjects(const Shader &shader) {}   // objects that will cast a shadow
     virtual void drawObjectsWithShadows(const Shader &shader);       // objects that will have a shadow cast on them
     virtual void drawObjectsWithoutShadows(const Shader &shader) {}  // objectst that will NOT have shadows cast on them
-
+    // draw trajectories
+    virtual void drawTrajectory(const Shader &shader, const Eigen::MatrixXd &future_pos, const Eigen::MatrixXd &future_vel, const Eigen::MatrixXd &future_traj) {}
+    
     virtual void draw() override;
     virtual void shadowPass();
     virtual void renderPass();

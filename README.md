@@ -1,3 +1,8 @@
+# 5.7 update
+- change DBMatching into un_normalized values;
+- add Param "Frame_indexes", which is a fast way to project frameidx back to corresponding index in DBMatching;
+- add drawTrajectory() function, showTrajectory bool;
+- add screen recording, screenIsRecording bool;
 # motion-matching
 
 Code base for the project: Motion Matching for Responsive Animation For Digital Humans.
