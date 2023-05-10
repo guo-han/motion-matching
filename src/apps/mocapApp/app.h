@@ -95,6 +95,11 @@ public:
     void drawObjectsWithoutShadows(const crl::gui::Shader &shader) override {
         if (selectedBvhClipIdx > -1)
             bvhClips[selectedBvhClipIdx]->draw(shader, frameIdx);
+        else if (bvhClips.size() != 0){
+            bvhClips[0]->draw(shader, 0);
+            selectedBvhClipIdx = 0;
+            processBVHClip();
+        }
         if (selectedC3dClipIdx > -1) {
             c3dClips[selectedC3dClipIdx]->draw(shader, frameIdx);
 
