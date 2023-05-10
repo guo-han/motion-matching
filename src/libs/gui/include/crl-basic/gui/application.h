@@ -17,7 +17,6 @@
 #include <imgui_widgets/imgui_add.h>
 #include <imgui_widgets/implot.h>
 #include <thread>
-#include "crl-basic/gui/Controller.h"
 
 namespace crl {
 namespace gui {
@@ -101,7 +100,8 @@ public:
     int screenShotCounter = 0;
     std::string screenshotPath = CRL_DATA_FOLDER "/out/screenshots";
 
-    crl::mocap::Controller controller;
+    // crl::mocap::Controller controller;
+    // bool isMotionMatching = true;
 };
 
 //-----------------------------------------------------------------------------------------------------------------------------------------------------------------

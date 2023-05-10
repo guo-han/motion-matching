@@ -1,6 +1,8 @@
 #pragma once
 
+#include <crl-basic/gui/Controller.h>
 #include <crl-basic/gui/application.h>
+#include <crl-basic/utils/timer.h>
 #include <imgui_widgets/imfilebrowser.h>
 
 #include "mocap/MocapClip.h"
@@ -28,6 +30,78 @@ public:
     }
 
     ~App() override {}
+
+    void run() override {
+        float tmpEntireLoopTimeRunningAverage = 0.0f;
+        float tmpProcessTimeRunningAverage = 0.0f;
+        int runningAverageStepCount = 0;
+
+        crl::Timer FPSDisplayTimer, processTimer, FPSTimer;
+        glfwSwapInterval(0);  //Disable waiting for framerate of glfw window
+
+        while (!glfwWindowShouldClose(window)) {
+            if (FPSDisplayTimer.timeEllapsed() > 0.33) {
+                // controller get input every 0.33s?
+                controller.manipulatefromWSAD(window);
+                FPSDisplayTimer.restart();
+                if (runningAverageStepCount > 0) {
+                    averageFPS = 1.0 / (tmpEntireLoopTimeRunningAverage / runningAverageStepCount);  // calculate FPS
+                    averagePercentTimeSpentProcessing =
+                        tmpProcessTimeRunningAverage / tmpEntireLoopTimeRunningAverage;  // calculate time for function process() or process_motion_matching()
+                } else {
+                    averageFPS = -1;
+                    averagePercentTimeSpentProcessing = -1;
+                }
+                tmpEntireLoopTimeRunningAverage = 0;
+                tmpProcessTimeRunningAverage = 0;
+                runningAverageStepCount = 0;
+            }
+            runningAverageStepCount++;
+
+            tmpEntireLoopTimeRunningAverage += FPSTimer.timeEllapsed();
+            FPSTimer.restart();
+
+            processTimer.restart();
+            if (!useSeparateProcessThread && processIsRunning)
+                process_motion_matching();
+            tmpProcessTimeRunningAverage += processTimer.timeEllapsed();
+
+            draw();
+
+            // glfw: swap buffers and poll IO events (keys pressed/released, mouse
+            // moved etc.)
+#ifdef SINGLE_BUFFER
+            glFlush();
+#else
+            glfwSwapBuffers(window);
+#endif
+            glfwPollEvents();
+
+            if (limitFramerate)
+                while (FPSTimer.timeEllapsed() < (1.0 / (double)targetFramerate)) {
+#ifndef WIN32
+                    using namespace std::chrono_literals;
+                    std::this_thread::sleep_for(1ms);  //Sleep for a bit (too inaccurate to be used on windows)
+#endif                                                 // WIN32
+                }
+
+            if (screenIsRecording) {
+                char filename[1000];
+                sprintf(filename, "%s_%04d.png", screenshotPath.c_str(), screenShotCounter);
+                screenshot(filename);
+                screenShotCounter++;
+            }
+        }
+
+        // glfw: terminate, clearing all previously allocated GLFW resources.
+        ImGui_ImplOpenGL3_Shutdown();
+        ImGui_ImplGlfw_Shutdown();
+        crl::gui::rendering::DestroyContext();
+        ImPlot::DestroyContext();
+        ImGui::DestroyContext();
+        glfwDestroyWindow(window);
+        glfwTerminate();
+    }
 
     void process() override {
         if (selectedBvhClipIdx == -1 && selectedC3dClipIdx == -1)
@@ -62,97 +136,142 @@ public:
         }
     }
 
+    void process_motion_matching() {    // 位置
+        // only for bvh
+        // No data input
+        if (currentMatchFrame == -1 && currentMatchClip == -1)
+            return;
+
+        if (currentMatchClip > -1) {
+            auto &clip = bvhClips[currentMatchClip];
+            if (auto *skel = clip->getModel()) {
+                // controller get state state type
+                auto state = clip->getState(currentMatchFrame);
+                skel->setState(&state);
+                // commentable
+                if (followCharacter) {
+                    camera.target.x = (float)clip->getModel()->root->state.pos.x;
+                    camera.target.z = (float)clip->getModel()->root->state.pos.z;
+                }
+                light.target.x() = (float)clip->getModel()->root->state.pos.x;
+                light.target.z() = (float)clip->getModel()->root->state.pos.z;
+            }
+            currentMatchFrame++;
+            currentFramesPlayed++;
+            if (currentMatchFrame >= clip->getFrameCount())// || currentFramesPlayed >= maxContFramePlayed)
+                currentMatchFrame == -1;  // should be searched again
+        }
+    }
     void restart() override {
         frameIdx = 0;
     }
 
     void prepareToDraw() override {
-        if (selectedBvhClipIdx > -1) {
-            bvhClips[selectedBvhClipIdx]->getModel()->showCoordFrame = showCoordinateFrames;
-        }
-        if (selectedC3dClipIdx > -1) {
-            c3dClips[selectedC3dClipIdx]->getModel()->showCoordFrame = showCoordinateFrames;
+        // if (selectedBvhClipIdx > -1) {
+        //     bvhClips[selectedBvhClipIdx]->getModel()->showCoordFrame = showCoordinateFrames;
+        // }
+        // if (selectedC3dClipIdx > -1) {
+        //     c3dClips[selectedC3dClipIdx]->getModel()->showCoordFrame = showCoordinateFrames;
+        // }
+        // only bvh
+        if (currentMatchClip > -1) {
+            bvhClips[currentMatchClip]->getModel()->showCoordFrame = showCoordinateFrames;
         }
     }
 
     void drawShadowCastingObjects(const crl::gui::Shader &shader) override {
-        if (selectedBvhClipIdx > -1) {
-            bvhClips[selectedBvhClipIdx]->draw(shader, frameIdx);
-        }
-        if (selectedC3dClipIdx > -1) {
-            c3dClips[selectedC3dClipIdx]->draw(shader, frameIdx);
-            auto state = c3dClips[selectedC3dClipIdx]->getState(frameIdx);
-            c3dClips[selectedC3dClipIdx]->getModel()->setState(&state);
-            for (const auto &linkName : linkNames) {
-                const auto *startMarker = c3dClips[selectedC3dClipIdx]->getModel()->getMarkerByName(linkName.first.c_str());
-                const auto *endMarker = c3dClips[selectedC3dClipIdx]->getModel()->getMarkerByName(linkName.second.c_str());
-                if (startMarker && endMarker)
-                    crl::gui::drawCapsule(startMarker->state.pos, endMarker->state.pos, 0.01, shader, crl::V3D(0.5, 0.5, 0.5));
-            }
+        // if (selectedBvhClipIdx > -1) {
+        //     bvhClips[selectedBvhClipIdx]->draw(shader, frameIdx);
+        // }
+        // if (selectedC3dClipIdx > -1) {
+        //     c3dClips[selectedC3dClipIdx]->draw(shader, frameIdx);
+        //     auto state = c3dClips[selectedC3dClipIdx]->getState(frameIdx);
+        //     c3dClips[selectedC3dClipIdx]->getModel()->setState(&state);
+        //     for (const auto &linkName : linkNames) {
+        //         const auto *startMarker = c3dClips[selectedC3dClipIdx]->getModel()->getMarkerByName(linkName.first.c_str());
+        //         const auto *endMarker = c3dClips[selectedC3dClipIdx]->getModel()->getMarkerByName(linkName.second.c_str());
+        //         if (startMarker && endMarker)
+        //             crl::gui::drawCapsule(startMarker->state.pos, endMarker->state.pos, 0.01, shader, crl::V3D(0.5, 0.5, 0.5));
+        //     }
+        // }
+        if (currentMatchClip > -1) {
+            bvhClips[currentMatchClip]->draw(shader, currentMatchFrame);
         }
     }
 
     void drawObjectsWithoutShadows(const crl::gui::Shader &shader) override {
-        if (selectedBvhClipIdx > -1)
-            bvhClips[selectedBvhClipIdx]->draw(shader, frameIdx);
-        if (selectedC3dClipIdx > -1) {
-            c3dClips[selectedC3dClipIdx]->draw(shader, frameIdx);
+        // if (selectedBvhClipIdx > -1)
+        //     bvhClips[selectedBvhClipIdx]->draw(shader, frameIdx);
+        // else if (bvhClips.size() != 0){
+        //     bvhClips[0]->draw(shader, 0);
+        //     selectedBvhClipIdx = 0;
+        //     processBVHClip();
+        // }
+        // if (selectedC3dClipIdx > -1) {
+        //     c3dClips[selectedC3dClipIdx]->draw(shader, frameIdx);
 
-            // draw skeleton
-            if (selectedC3dClipIdx > -1) {
-                c3dClips[selectedC3dClipIdx]->draw(shader, frameIdx);
-                auto state = c3dClips[selectedC3dClipIdx]->getState(frameIdx);
-                c3dClips[selectedC3dClipIdx]->getModel()->setState(&state);
-                for (const auto &linkName : linkNames) {
-                    const auto *startMarker = c3dClips[selectedC3dClipIdx]->getModel()->getMarkerByName(linkName.first.c_str());
-                    const auto *endMarker = c3dClips[selectedC3dClipIdx]->getModel()->getMarkerByName(linkName.second.c_str());
-                    if (startMarker && endMarker)
-                        crl::gui::drawCapsule(startMarker->state.pos, endMarker->state.pos, 0.01, shader, crl::V3D(0.5, 0.5, 0.5));
-                }
+        //     // draw skeleton
+        //     if (selectedC3dClipIdx > -1) {
+        //         c3dClips[selectedC3dClipIdx]->draw(shader, frameIdx);
+        //         auto state = c3dClips[selectedC3dClipIdx]->getState(frameIdx);
+        //         c3dClips[selectedC3dClipIdx]->getModel()->setState(&state);
+        //         for (const auto &linkName : linkNames) {
+        //             const auto *startMarker = c3dClips[selectedC3dClipIdx]->getModel()->getMarkerByName(linkName.first.c_str());
+        //             const auto *endMarker = c3dClips[selectedC3dClipIdx]->getModel()->getMarkerByName(linkName.second.c_str());
+        //             if (startMarker && endMarker)
+        //                 crl::gui::drawCapsule(startMarker->state.pos, endMarker->state.pos, 0.01, shader, crl::V3D(0.5, 0.5, 0.5));
+        //         }
 
-                if (showVirtualLimbs)
-                    for (const auto &linkName : virtualLinkNames) {
-                        const auto *startMarker = c3dClips[selectedC3dClipIdx]->getModel()->getMarkerByName(linkName.first.c_str());
-                        const auto *endMarker = c3dClips[selectedC3dClipIdx]->getModel()->getMarkerByName(linkName.second.c_str());
-                        if (startMarker && endMarker)
-                            crl::gui::drawCapsule(startMarker->state.pos, endMarker->state.pos, 0.01, shader, crl::V3D(0.5, 0.5, 0.5), 0.2);
-                    }
-            }
+        //         if (showVirtualLimbs)
+        //             for (const auto &linkName : virtualLinkNames) {
+        //                 const auto *startMarker = c3dClips[selectedC3dClipIdx]->getModel()->getMarkerByName(linkName.first.c_str());
+        //                 const auto *endMarker = c3dClips[selectedC3dClipIdx]->getModel()->getMarkerByName(linkName.second.c_str());
+        //                 if (startMarker && endMarker)
+        //                     crl::gui::drawCapsule(startMarker->state.pos, endMarker->state.pos, 0.01, shader, crl::V3D(0.5, 0.5, 0.5), 0.2);
+        //             }
+        //     }
 
-            // draw foot contact
-            if (showContactState)
-                for (const auto &footMarkerName : footMarkerNames) {
-                    bool isSwing = false;
-                    for (const auto &swing : footSteps[footMarkerName]) {
-                        if (swing.first <= frameIdx * c3dClips[selectedC3dClipIdx]->getFrameTimeStep() &&
-                            frameIdx * c3dClips[selectedC3dClipIdx]->getFrameTimeStep() <= swing.second)
-                            isSwing = true;
-                    }
-                    if (isSwing)
-                        crl::gui::drawSphere(c3dClips[selectedC3dClipIdx]->getModel()->getMarkerByName(footMarkerName.c_str())->state.pos,  //
-                                             0.05, shader, crl::V3D(1, 0, 1), 0.5);
-                    else
-                        crl::gui::drawSphere(c3dClips[selectedC3dClipIdx]->getModel()->getMarkerByName(footMarkerName.c_str())->state.pos,  //
-                                             0.05, shader, crl::V3D(0, 1, 0), 0.5);
-                }
-            for (const auto &footMarkerName : footMarkerNames) {
-                bool isSwing = false;
-                for (const auto &swing : footSteps[footMarkerName]) {
-                    if (swing.first <= frameIdx * c3dClips[selectedC3dClipIdx]->getFrameTimeStep() &&
-                        frameIdx * c3dClips[selectedC3dClipIdx]->getFrameTimeStep() <= swing.second)
-                        isSwing = true;
-                }
-                if (isSwing)
-                    crl::gui::drawSphere(c3dClips[selectedC3dClipIdx]->getModel()->getMarkerByName(footMarkerName.c_str())->state.pos,  //
-                                         0.05, shader, crl::V3D(1, 0, 1), 0.5);
-                else
-                    crl::gui::drawSphere(c3dClips[selectedC3dClipIdx]->getModel()->getMarkerByName(footMarkerName.c_str())->state.pos,  //
-                                         0.05, shader, crl::V3D(0, 1, 0), 0.5);
-            }
+        //     // draw foot contact
+        //     if (showContactState)
+        //         for (const auto &footMarkerName : footMarkerNames) {
+        //             bool isSwing = false;
+        //             for (const auto &swing : footSteps[footMarkerName]) {
+        //                 if (swing.first <= frameIdx * c3dClips[selectedC3dClipIdx]->getFrameTimeStep() &&
+        //                     frameIdx * c3dClips[selectedC3dClipIdx]->getFrameTimeStep() <= swing.second)
+        //                     isSwing = true;
+        //             }
+        //             if (isSwing)
+        //                 crl::gui::drawSphere(c3dClips[selectedC3dClipIdx]->getModel()->getMarkerByName(footMarkerName.c_str())->state.pos,  //
+        //                                      0.05, shader, crl::V3D(1, 0, 1), 0.5);
+        //             else
+        //                 crl::gui::drawSphere(c3dClips[selectedC3dClipIdx]->getModel()->getMarkerByName(footMarkerName.c_str())->state.pos,  //
+        //                                      0.05, shader, crl::V3D(0, 1, 0), 0.5);
+        //         }
+        //     for (const auto &footMarkerName : footMarkerNames) {
+        //         bool isSwing = false;
+        //         for (const auto &swing : footSteps[footMarkerName]) {
+        //             if (swing.first <= frameIdx * c3dClips[selectedC3dClipIdx]->getFrameTimeStep() &&
+        //                 frameIdx * c3dClips[selectedC3dClipIdx]->getFrameTimeStep() <= swing.second)
+        //                 isSwing = true;
+        //         }
+        //         if (isSwing)
+        //             crl::gui::drawSphere(c3dClips[selectedC3dClipIdx]->getModel()->getMarkerByName(footMarkerName.c_str())->state.pos,  //
+        //                                  0.05, shader, crl::V3D(1, 0, 1), 0.5);
+        //         else
+        //             crl::gui::drawSphere(c3dClips[selectedC3dClipIdx]->getModel()->getMarkerByName(footMarkerName.c_str())->state.pos,  //
+        //                                  0.05, shader, crl::V3D(0, 1, 0), 0.5);
+        //     }
 
-            // selected marker (for debugging)
-            if (selectedMarkerIdx > -1)
-                crl::gui::drawSphere(c3dClips[selectedC3dClipIdx]->getModel()->getMarker(selectedMarkerIdx)->state.pos, 0.05, shader, crl::V3D(1, 0, 0), 0.5);
+        //     // selected marker (for debugging)
+        //     if (selectedMarkerIdx > -1)
+        //         crl::gui::drawSphere(c3dClips[selectedC3dClipIdx]->getModel()->getMarker(selectedMarkerIdx)->state.pos, 0.05, shader, crl::V3D(1, 0, 0), 0.5);
+        // }
+        if (currentMatchClip > -1)
+            bvhClips[currentMatchClip]->draw(shader, frameIdx);
+        else if (bvhClips.size() != 0) {
+            bvhClips[0]->draw(shader, 0);
+            currentMatchClip = 0;
+            processBVHClip();
         }
     }
 
@@ -311,6 +430,28 @@ public:
         crl::Logger::consolePrint("Imported %d clips.\n", cnt);
     }
 
+    void transferSkeletonInformationToController() {
+        // call after get the motion matching result ?
+        // auto state = bvhClips[currentMatchClip]->getState(currentMatchFrame);
+        auto *sk = bvhClips[currentMatchClip]->getModel();
+        sk->setState(&bvhClips[currentMatchClip]->getState(currentMatchFrame));
+        std::vector<crl::V3D> markervel;
+        std::vector<crl::Quaternion> markerQuat;
+        std::vector<crl::P3D> markerpos;
+        for (int i = 0; i < DBmarkerNames.size(); i++) {
+            const auto &name = DBmarkerNames[i];
+            if (const auto joint = sk->getMarkerByName(name.c_str())) {
+                crl::P3D eepos = joint->state.pos;
+                crl::V3D eevel = joint->state.velocity;
+                crl::Quaternion eequat = joint->state.orientation;
+                markervel.push_back(eevel);
+                markerpos.push_back(eepos);
+                markerQuat.push_back(eequat);
+            }
+        }
+        controller.updateNewSkeletionInfo(markerpos, markervel, markerQuat);  // 可能要改orz
+    }
+
 private:
     bool loadSingleMocapFile(const fs::path &path) {
         try {
@@ -424,8 +565,7 @@ private:
 
         // extracting foot velocity and position
         DBtotalFrame = 0;
-        for (uint bvhidx = 0; bvhidx < bvhClips.size(); bvhidx++)
-        {
+        for (uint bvhidx = 0; bvhidx < bvhClips.size(); bvhidx++) {
             DBtotalFrame += bvhClips[bvhidx]->getFrameCount();
         }
         std::vector<std::string> DBmarkerNames = {"LeftFoot", "RightFoot", "Hips"};
@@ -434,9 +574,8 @@ private:
         Feature_std.setZero(DBfeatVecDim);
 
         int counter = 0;
-        
-        for (uint bvhidx = 0; bvhidx < bvhClips.size(); bvhidx++)
-        {
+
+        for (uint bvhidx = 0; bvhidx < bvhClips.size(); bvhidx++) {
             int clipFrameNum = bvhClips[bvhidx]->getFrameCount();
 
             Eigen::MatrixXd footJointPos;
@@ -460,7 +599,7 @@ private:
                     if (const auto joint = sk->getMarkerByName(name.c_str())) {
                         crl::P3D eepos = joint->state.pos;
                         crl::V3D eevel = joint->state.velocity;
-                        if (j == 0) // left Toe
+                        if (j == 0)  // left Toe
                         {
                             footJointPos(i, 0) = eepos.x;
                             footJointPos(i, 1) = eepos.y;
@@ -468,8 +607,7 @@ private:
                             footJointVel(i, 0) = eevel.x();
                             footJointVel(i, 1) = eevel.y();
                             footJointVel(i, 2) = eevel.z();
-                        }
-                        else if (j == 1)    // right Toe
+                        } else if (j == 1)  // right Toe
                         {
                             footJointPos(i, 3) = eepos.x;
                             footJointPos(i, 4) = eepos.y;
@@ -477,8 +615,7 @@ private:
                             footJointVel(i, 3) = eevel.x();
                             footJointVel(i, 4) = eevel.y();
                             footJointVel(i, 5) = eevel.z();
-                        }
-                        else if (j == 2)   // HIP
+                        } else if (j == 2)  // HIP
                         {
                             hipJointVel(i, 0) = eevel.x();
                             hipJointVel(i, 1) = eevel.y();
@@ -490,39 +627,39 @@ private:
                 trajPoseonGround(i, 1) = (footJointPos(i, 2) + footJointPos(i, 5)) / 2;
             }
             // compute traj facing direction for every frame
-            trajDirection.block(0, 0, clipFrameNum - 1, 2) = trajPoseonGround.block(1, 0, clipFrameNum - 1, 2) - trajPoseonGround.block(0, 0, clipFrameNum - 1, 2);
-            trajDirection.row(clipFrameNum - 1) = trajDirection.row(clipFrameNum - 2); // set the last frame
+            trajDirection.block(0, 0, clipFrameNum - 1, 2) =
+                trajPoseonGround.block(1, 0, clipFrameNum - 1, 2) - trajPoseonGround.block(0, 0, clipFrameNum - 1, 2);
+            trajDirection.row(clipFrameNum - 1) = trajDirection.row(clipFrameNum - 2);  // set the last frame
             trajDirection.rowwise().normalize();
 
             // defined for 30Hz, stores the future 10\20\30 frames
             // add future trajectory position
-            DBMatching.block(counter, 0, clipFrameNum - 10, 2) = trajPoseonGround.block(10, 0, clipFrameNum - 10, 2); 
-            DBMatching.block(counter, 2, clipFrameNum - 20, 2) = trajPoseonGround.block(20, 0, clipFrameNum - 20, 2); 
-            DBMatching.block(counter, 4, clipFrameNum - 30, 2) = trajPoseonGround.block(30, 0, clipFrameNum - 30, 2); 
+            DBMatching.block(counter, 0, clipFrameNum - 10, 2) = trajPoseonGround.block(10, 0, clipFrameNum - 10, 2);
+            DBMatching.block(counter, 2, clipFrameNum - 20, 2) = trajPoseonGround.block(20, 0, clipFrameNum - 20, 2);
+            DBMatching.block(counter, 4, clipFrameNum - 30, 2) = trajPoseonGround.block(30, 0, clipFrameNum - 30, 2);
             // add future trajectory facing direction
-            DBMatching.block(counter, 6, clipFrameNum - 10, 2) = trajDirection.block(10, 0, clipFrameNum - 10, 2); 
-            DBMatching.block(counter, 8, clipFrameNum - 20, 2) = trajDirection.block(20, 0, clipFrameNum - 20, 2); 
-            DBMatching.block(counter, 10, clipFrameNum - 30, 2) = trajDirection.block(30, 0, clipFrameNum - 30, 2); 
+            DBMatching.block(counter, 6, clipFrameNum - 10, 2) = trajDirection.block(10, 0, clipFrameNum - 10, 2);
+            DBMatching.block(counter, 8, clipFrameNum - 20, 2) = trajDirection.block(20, 0, clipFrameNum - 20, 2);
+            DBMatching.block(counter, 10, clipFrameNum - 30, 2) = trajDirection.block(30, 0, clipFrameNum - 30, 2);
             DBMatching.block(counter, 12, clipFrameNum, 6) = footJointPos;
             DBMatching.block(counter, 18, clipFrameNum, 6) = footJointVel;
             DBMatching.block(counter, 24, clipFrameNum, 3) = hipJointVel;
             counter += clipFrameNum;
         }
 
-        for (int i=0; i<DBMatching.cols(); i++){
+        for (int i = 0; i < DBMatching.cols(); i++) {
             Eigen::VectorXd col = DBMatching.col(i);
-            double mean = col.mean();          // Compute mean
+            double mean = col.mean();                           // Compute mean
             double std = (col.array() - mean).square().mean();  // Compute variance
-            std = std > 0 ? sqrt(std) : 0;     // Compute standard deviation from variance
-            
+            std = std > 0 ? sqrt(std) : 0;                      // Compute standard deviation from variance
+
             DBMatching.col(i) = (DBMatching.col(i).array() - mean) / std;
             Feature_mean[i] = mean;
             Feature_std[i] = std;
         }
     }
 
-    int MMSearchforIndex(Eigen::RowVectorXd& inputFeatureQuery)
-    {
+    int MMSearchforIndex(Eigen::RowVectorXd &inputFeatureQuery) {
         Eigen::RowVectorXd normalizedQuery = (inputFeatureQuery.array() - Feature_mean.array()) / Feature_std.array();
         Eigen::VectorXd norms = (DBMatching.rowwise() - inputFeatureQuery).rowwise().norm();
         int index;
@@ -711,7 +848,15 @@ private:
     Eigen::MatrixXd DBMatching;
     Eigen::VectorXd Feature_mean;
     Eigen::VectorXd Feature_std;
-    int DBfeatVecDim = 27; // ?
-};
+    int DBfeatVecDim = 27;  // ?
+    int currentMatchClip = -1;
+    int currentMatchFrame = -1;
+    int currentMatIdx = 0;
+    int currentFramesPlayed = 0;
+    int maxContFramePlayed = 5;
+    std::vector<std::string> DBmarkerNames = {"LeftFoot", "RightFoot", "Hips"};
 
+    bool runMotionMatching;
+    crl::mocap::Controller controller;
+};
 }  // namespace mocapApp
