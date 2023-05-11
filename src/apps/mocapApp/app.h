@@ -693,10 +693,6 @@ private:
     }
 
     void processAllBVHClip() {
-        // if (selectedBvhClipIdx == -1)
-        //     return;
-
-        // extracting foot velocity and position
         DBtotalFrame = 0;
         for (uint bvhidx = 0; bvhidx < bvhClips.size(); bvhidx++) {
             DBtotalFrame += bvhClips[bvhidx]->getFrameCount();
@@ -718,16 +714,18 @@ private:
             {
                 accumulatedFrameNum[bvhidx] = accumulatedFrameNum[bvhidx - 1] + clipFrameNum;
             }
+
             Eigen::MatrixXd footJointPos;
             footJointPos.setZero(clipFrameNum, 6);
             Eigen::MatrixXd footJointVel;
             footJointVel.setZero(clipFrameNum, 6);
             Eigen::MatrixXd hipJointVel;
             hipJointVel.setZero(clipFrameNum, 3);
+            Eigen::MatrixXd hipJointPos;
+            hipJointPos.setZero(clipFrameNum, 3);
             Eigen::MatrixXd trajPoseonGround;
             trajPoseonGround.setZero(clipFrameNum, 2);
-            Eigen::MatrixXd trajDirection;
-            trajDirection.setZero(clipFrameNum, 2);
+            std::vector<crl::Quaternion> hipQuaternions;
 
             auto *sk = bvhClips[bvhidx]->getModel();
 
@@ -739,7 +737,7 @@ private:
                     if (const auto joint = sk->getMarkerByName(name.c_str())) {
                         crl::P3D eepos = joint->state.pos;
                         crl::V3D eevel = joint->state.velocity;
-                        if (j == 0)  // left Toe
+                        if (j == 0)  // left foot
                         {
                             footJointPos(i, 0) = eepos.x;
                             footJointPos(i, 1) = eepos.y;
@@ -747,7 +745,7 @@ private:
                             footJointVel(i, 0) = eevel.x();
                             footJointVel(i, 1) = eevel.y();
                             footJointVel(i, 2) = eevel.z();
-                        } else if (j == 1)  // right Toe
+                        } else if (j == 1)  // right foot
                         {
                             footJointPos(i, 3) = eepos.x;
                             footJointPos(i, 4) = eepos.y;
@@ -755,33 +753,85 @@ private:
                             footJointVel(i, 3) = eevel.x();
                             footJointVel(i, 4) = eevel.y();
                             footJointVel(i, 5) = eevel.z();
-                        } else if (j == 2)  // HIP
+                        } else if (j == 2)  // Hips
                         {
+                            hipJointPos(i, 0) = eepos.x;
+                            hipJointPos(i, 1) = eepos.y;
+                            hipJointPos(i, 2) = eepos.z;
                             hipJointVel(i, 0) = eevel.x();
                             hipJointVel(i, 1) = eevel.y();
                             hipJointVel(i, 2) = eevel.z();
+                            crl::Quaternion eequat = joint->state.orientation;
+                            hipQuaternions.push_back(eequat);
                         }
                     }
                 }
                 trajPoseonGround(i, 0) = (footJointPos(i, 0) + footJointPos(i, 3)) / 2;
                 trajPoseonGround(i, 1) = (footJointPos(i, 2) + footJointPos(i, 5)) / 2;
             }
-            // compute traj facing direction for every frame
-            trajDirection.block(0, 0, clipFrameNum - 1, 2) =
-                trajPoseonGround.block(1, 0, clipFrameNum - 1, 2) - trajPoseonGround.block(0, 0, clipFrameNum - 1, 2);
-            trajDirection.row(clipFrameNum - 1) = trajDirection.row(clipFrameNum - 2);  // set the last frame
-            trajDirection.rowwise().normalize();
+            // compute future traj facing direction for every frame and save in DBMatching
+            assert(hipQuaternions.size() == clipFrameNum);
 
+            for (int i = 0; i < clipFrameNum; i++)
+            {
+                crl::Quaternion localInverse = hipQuaternions[i].inverse();
+                Eigen::Vector3d positiveDirection(1, 0, 0);
+                
+                if (i + 10 < clipFrameNum)
+                {
+                    crl::Quaternion q10 = hipQuaternions[i + 10];
+                    crl::Quaternion q_relative_10 = q10 * localInverse;
+                    Eigen::Vector3d face_direction_10 = q_relative_10 * positiveDirection;
+                    face_direction_10(1) = 0;
+                    face_direction_10.normalize();
+                    DBMatching(counter + i, 6) = face_direction_10(0);
+                    DBMatching(counter + i, 7) = face_direction_10(2);
+                }
+                if (i + 20 < clipFrameNum)
+                {
+                    crl::Quaternion q20 = hipQuaternions[i + 20];
+                    crl::Quaternion q_relative_20 = q20 * localInverse;
+                    Eigen::Vector3d face_direction_20 = q_relative_20 * positiveDirection;
+                    face_direction_20(1) = 0;
+                    face_direction_20.normalize();
+                    DBMatching(counter + i, 8) = face_direction_20(0);
+                    DBMatching(counter + i, 9) = face_direction_20(2);
+                }
+                if (i + 30 < clipFrameNum)
+                {
+                    crl::Quaternion q30 = hipQuaternions[i + 30];
+                    crl::Quaternion q_relative_30 = q30 * localInverse;
+                    Eigen::Vector3d face_direction_30 = q_relative_30 * positiveDirection;
+                    face_direction_30(1) = 0;
+                    face_direction_30.normalize();
+                    DBMatching(counter + i, 10) = face_direction_30(0);
+                    DBMatching(counter + i, 11) = face_direction_30(2);
+                }
+            }
+
+            // compute foot joint velocity and hip joint velocity local to character
+            for (int i = 0; i < clipFrameNum; i++)
+            {
+                crl::Quaternion hipQuat = hipQuaternions[i];
+                Eigen::Matrix3d local_rot_mat_transpose = hipQuat.toRotationMatrix().transpose();
+                Eigen::Vector3d localHipVel = local_rot_mat_transpose * hipJointVel.row(i);
+                Eigen::Vector3d localLeftFootVelocity = local_rot_mat_transpose * footJointVel.row(i).head(3);
+                Eigen::Vector3d localRightFootVelocity = local_rot_mat_transpose * footJointVel.row(i).tail(3);
+                hipJointVel.row(i) << localHipVel;
+                footJointVel.row(i).segment(0, 3) = localLeftFootVelocity;
+                footJointVel.row(i).segment(3, 3) = localRightFootVelocity;
+            }
+            
+
+            // Compute local hip joint velocity relative to character orientation
+            Eigen::Vector3f local_velocity = rot_mat.transpose() * global_velocity;
             // defined for 30Hz, stores the future 10\20\30 frames
             // add future trajectory position
-            DBMatching.block(counter, 0, clipFrameNum - 10, 2) = trajPoseonGround.block(10, 0, clipFrameNum - 10, 2);
-            DBMatching.block(counter, 2, clipFrameNum - 20, 2) = trajPoseonGround.block(20, 0, clipFrameNum - 20, 2);
-            DBMatching.block(counter, 4, clipFrameNum - 30, 2) = trajPoseonGround.block(30, 0, clipFrameNum - 30, 2);
-            // add future trajectory facing direction
-            DBMatching.block(counter, 6, clipFrameNum - 10, 2) = trajDirection.block(10, 0, clipFrameNum - 10, 2);
-            DBMatching.block(counter, 8, clipFrameNum - 20, 2) = trajDirection.block(20, 0, clipFrameNum - 20, 2);
-            DBMatching.block(counter, 10, clipFrameNum - 30, 2) = trajDirection.block(30, 0, clipFrameNum - 30, 2);
-            DBMatching.block(counter, 12, clipFrameNum, 6) = footJointPos;
+            DBMatching.block(counter, 0, clipFrameNum - 10, 2) = trajPoseonGround.block(10, 0, clipFrameNum - 10, 2) - trajPoseonGround.block(0, 0, clipFrameNum - 10, 2);
+            DBMatching.block(counter, 2, clipFrameNum - 20, 2) = trajPoseonGround.block(20, 0, clipFrameNum - 20, 2) - trajPoseonGround.block(0, 0, clipFrameNum - 20, 2);
+            DBMatching.block(counter, 4, clipFrameNum - 30, 2) = trajPoseonGround.block(30, 0, clipFrameNum - 30, 2) - trajPoseonGround.block(0, 0, clipFrameNum - 30, 2);
+            DBMatching.block(counter, 12, clipFrameNum, 3) = footJointPos.block(0, 0, clipFrameNum, 3) - hipJointPos;
+            DBMatching.block(counter, 15, clipFrameNum, 3) = footJointPos.block(0, 3, clipFrameNum, 3) - hipJointPos;
             DBMatching.block(counter, 18, clipFrameNum, 6) = footJointVel;
             DBMatching.block(counter, 24, clipFrameNum, 3) = hipJointVel;
             counter += clipFrameNum;
