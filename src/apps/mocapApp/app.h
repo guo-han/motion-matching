@@ -814,17 +814,14 @@ private:
             {
                 crl::Quaternion hipQuat = hipQuaternions[i];
                 Eigen::Matrix3d local_rot_mat_transpose = hipQuat.toRotationMatrix().transpose();
-                Eigen::Vector3d localHipVel = local_rot_mat_transpose * hipJointVel.row(i);
-                Eigen::Vector3d localLeftFootVelocity = local_rot_mat_transpose * footJointVel.row(i).head(3);
-                Eigen::Vector3d localRightFootVelocity = local_rot_mat_transpose * footJointVel.row(i).tail(3);
+                Eigen::Vector3d localHipVel = local_rot_mat_transpose * hipJointVel.row(i).transpose();
+                Eigen::Vector3d localLeftFootVelocity = local_rot_mat_transpose * footJointVel.row(i).head(3).transpose();
+                Eigen::Vector3d localRightFootVelocity = local_rot_mat_transpose * footJointVel.row(i).tail(3).transpose();
                 hipJointVel.row(i) << localHipVel;
                 footJointVel.row(i).segment(0, 3) = localLeftFootVelocity;
                 footJointVel.row(i).segment(3, 3) = localRightFootVelocity;
             }
-            
-
-            // Compute local hip joint velocity relative to character orientation
-            Eigen::Vector3f local_velocity = rot_mat.transpose() * global_velocity;
+        
             // defined for 30Hz, stores the future 10\20\30 frames
             // add future trajectory position
             DBMatching.block(counter, 0, clipFrameNum - 10, 2) = trajPoseonGround.block(10, 0, clipFrameNum - 10, 2) - trajPoseonGround.block(0, 0, clipFrameNum - 10, 2);
