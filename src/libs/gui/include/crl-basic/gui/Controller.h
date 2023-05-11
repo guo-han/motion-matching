@@ -20,7 +20,6 @@ namespace crl::mocap {
             // intialize vectors -- to be done
             speed_add_unit = 0.01;
         };
-        GameObject gameObject;
 
         void run(GLFWwindow *window, const crl::P3D& hippos, const crl::V3D& hipvel, crl::gui::TrackingCamera &camera, Eigen::VectorXd& futureTrajInfo)
         {
@@ -49,7 +48,13 @@ namespace crl::mocap {
         void obtainTrajectoryInfo(Eigen::VectorXd& futureTrajInfo)
         {
             futureTrajInfo.setZero(12);
-            futureTrajInfo << object.trajectoryPos.row(20), object.trajectoryPos.row(40), object.trajectoryPos.row(60), object.trajectoryDir.row(20), object.trajectoryDir.row(40), object.trajectoryDir.row(60); // 要不要改成10 20 30
+            futureTrajInfo << object.trajectoryPos(19,0), object.trajectoryPos(19,1), 
+                              object.trajectoryPos(39,0), object.trajectoryPos(39,1),
+                              object.trajectoryPos(59,0), object.trajectoryPos(59,1),
+                              object.trajectoryDir(19,0), object.trajectoryDir(19,1),
+                              object.trajectoryDir(39,0), object.trajectoryDir(39,1),
+                              object.trajectoryDir(59,0), object.trajectoryDir(59,1); //要不要改成10 20 30
+            
         }
 
         Eigen::VectorXd prevFeat;

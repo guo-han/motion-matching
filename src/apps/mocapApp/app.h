@@ -91,7 +91,11 @@ public:
                 screenshot(filename);
                 screenShotCounter++;
             }
-            motion_matching_end_process();
+            if (currentMatchClip != -1 && processIsRunning)
+            {
+                motion_matching_end_process();
+            }
+            
         }
 
         // glfw: terminate, clearing all previously allocated GLFW resources.
@@ -188,13 +192,14 @@ public:
                 controller.run(window, markerpos, markervel, camera, trajInfo);
                 updateQueryVector(trajInfo);
                 MMSearchforIndex();
+                currentContinousFramesPlayed = 0;
             }
             else
             {
                 std::cout << "getModelError" << std::endl;
             }
         }
-        
+        currentMatchFrame = nextMatchFrame;
     }
     
     void restart() override {
@@ -811,6 +816,7 @@ private:
             {
                 currentMatchClip = i;
                 currentMatchFrame = i > 0 ? currentMatchIdx - accumulatedFrameNum[i - 1] : currentMatchIdx;
+                break;
             }
         }
     }
