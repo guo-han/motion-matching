@@ -42,7 +42,7 @@ public:
         while (!glfwWindowShouldClose(window)) {
             if (FPSDisplayTimer.timeEllapsed() > 0.33) {
                 // controller get input every 0.33s?
-                controller.manipulatefromWSAD(window);
+                // controller.getInputfromWSAD(window);
                 FPSDisplayTimer.restart();
                 if (runningAverageStepCount > 0) {
                     averageFPS = 1.0 / (tmpEntireLoopTimeRunningAverage / runningAverageStepCount);  // calculate FPS
@@ -91,6 +91,7 @@ public:
                 screenshot(filename);
                 screenShotCounter++;
             }
+            motion_matching_end_process();
         }
 
         // glfw: terminate, clearing all previously allocated GLFW resources.
@@ -136,32 +137,66 @@ public:
         }
     }
 
-    void process_motion_matching() {    // 位置
-        // only for bvh
+    void updateQueryVector(const Eigen::VectorXd& trajInfo)
+    {
+        currentQueryVector = DBMatching.row(currentMatchIdx);
+        currentQueryVector.block(0, 0, 12, 1) << trajInfo;
+    }
+
+    void process_motion_matching() {    // 位置与编译错误
+        // Only for bvh
         // No data input
         if (currentMatchFrame == -1 && currentMatchClip == -1)
             return;
-
+        
         if (currentMatchClip > -1) {
             auto &clip = bvhClips[currentMatchClip];
             if (auto *skel = clip->getModel()) {
                 // controller get state state type
                 auto state = clip->getState(currentMatchFrame);
+                // TODO: need to update the hip position and velocity here
                 skel->setState(&state);
-                // commentable
+                // TODO: check the settings of camera target position, viewing angle.
                 if (followCharacter) {
                     camera.target.x = (float)clip->getModel()->root->state.pos.x;
                     camera.target.z = (float)clip->getModel()->root->state.pos.z;
                 }
                 light.target.x() = (float)clip->getModel()->root->state.pos.x;
                 light.target.z() = (float)clip->getModel()->root->state.pos.z;
+                // auto updatedState = controller.getUpdatedState(state);   
             }
-            currentMatchFrame++;
-            currentFramesPlayed++;
-            if (currentMatchFrame >= clip->getFrameCount())// || currentFramesPlayed >= maxContFramePlayed)
-                currentMatchFrame == -1;  // should be searched again
         }
     }
+    
+    void motion_matching_end_process()
+    {
+        nextMatchFrame = currentMatchFrame + 1;
+        nextMatchClip = currentMatchClip;
+        currentContinousFramesPlayed++;
+        auto &clip = bvhClips[currentMatchClip];
+        if (nextMatchFrame >= clip->getFrameCount() || currentContinousFramesPlayed >= maxContFramePlayed)
+        {
+            if (auto *skel = clip->getModel()) {
+                crl::V3D markervel;
+                crl::P3D markerpos;
+                std::string marker = "Hips";
+                if (const auto joint = skel -> getMarkerByName(marker.c_str())) {
+                    markerpos = joint->state.pos;
+                    markervel = joint->state.velocity;
+                } 
+                Eigen::VectorXd trajInfo;
+                controller.run(window, markerpos, markervel, camera, trajInfo);
+                updateQueryVector(trajInfo);
+                MMSearchforIndex();
+            }
+            else
+            {
+                std::cout << "getModelError" << std::endl;
+            }
+        }
+        
+    }
+    
     void restart() override {
         frameIdx = 0;
     }
@@ -267,10 +302,12 @@ public:
         //         crl::gui::drawSphere(c3dClips[selectedC3dClipIdx]->getModel()->getMarker(selectedMarkerIdx)->state.pos, 0.05, shader, crl::V3D(1, 0, 0), 0.5);
         // }
         if (currentMatchClip > -1)
-            bvhClips[currentMatchClip]->draw(shader, frameIdx);
+            bvhClips[currentMatchClip]->draw(shader, currentMatchFrame);
         else if (bvhClips.size() != 0) {
             bvhClips[0]->draw(shader, 0);
             currentMatchClip = 0;
+            currentMatchFrame = 0;
+            currentMatchIdx = 0;
             processBVHClip();
         }
     }
@@ -331,6 +368,7 @@ public:
                         processBVHClip();
                     }
                 }
+
                 ImGui::ListBoxFooter();
             }
             if (ImGui::ListBoxHeader("C3D\nMocap Clips##MocapClips", 10)) {
@@ -430,27 +468,27 @@ public:
         crl::Logger::consolePrint("Imported %d clips.\n", cnt);
     }
 
-    void transferSkeletonInformationToController() {
-        // call after get the motion matching result ?
-        // auto state = bvhClips[currentMatchClip]->getState(currentMatchFrame);
-        auto *sk = bvhClips[currentMatchClip]->getModel();
-        sk->setState(&bvhClips[currentMatchClip]->getState(currentMatchFrame));
-        std::vector<crl::V3D> markervel;
-        std::vector<crl::Quaternion> markerQuat;
-        std::vector<crl::P3D> markerpos;
-        for (int i = 0; i < DBmarkerNames.size(); i++) {
-            const auto &name = DBmarkerNames[i];
-            if (const auto joint = sk->getMarkerByName(name.c_str())) {
-                crl::P3D eepos = joint->state.pos;
-                crl::V3D eevel = joint->state.velocity;
-                crl::Quaternion eequat = joint->state.orientation;
-                markervel.push_back(eevel);
-                markerpos.push_back(eepos);
-                markerQuat.push_back(eequat);
-            }
-        }
-        controller.updateNewSkeletionInfo(markerpos, markervel, markerQuat);  // 可能要改orz
-    }
+    // void transferSkeletonInformationToController() {
+    //     // call after get the motion matching result ?
+    //     // auto state = bvhClips[currentMatchClip]->getState(currentMatchFrame);
+    //     auto *sk = bvhClips[currentMatchClip]->getModel();
+    //     sk->setState(&bvhClips[currentMatchClip]->getState(currentMatchFrame));
+    //     std::vector<crl::V3D> markervel;
+    //     std::vector<crl::Quaternion> markerQuat;
+    //     std::vector<crl::P3D> markerpos;
+    //     for (int i = 0; i < DBmarkerNames.size(); i++) {
+    //         const auto &name = DBmarkerNames[i];
+    //         if (const auto joint = sk->getMarkerByName(name.c_str())) {
+    //             crl::P3D eepos = joint->state.pos;
+    //             crl::V3D eevel = joint->state.velocity;
+    //             crl::Quaternion eequat = joint->state.orientation;
+    //             markervel.push_back(eevel);
+    //             markerpos.push_back(eepos);
+    //             markerQuat.push_back(eequat);
+    //         }
+    //     }
+    //     controller.updateNewSkeletionInfo(markerpos, markervel, markerQuat);  // 可能要改orz
+    // }
 
 private:
     bool loadSingleMocapFile(const fs::path &path) {
@@ -467,7 +505,97 @@ private:
     }
 
     void processBVHClip() {
-        if (selectedBvhClipIdx == -1)
+        // if (selectedBvhClipIdx == -1)
+        //     return;
+
+        // footSteps.clear();
+        // // footMarkerNames = {"LeftHand", "LeftFoot", "RightHand", "RightFoot"};
+        // footMarkerNames = {"LeftToe", "RightToe"};
+        // linkNames = {};
+        // virtualLinkNames = {};
+
+        // // initialize plots
+        // baseHeightPlot.clearAll();
+        // baseSpeedPlot.clearAll();
+        // feetHeightPlot.clearAll();
+        // feetVelocityPlot.clearAll();
+        // feetAccelerationPlot.clearAll();
+        // baseHeightPlot.addLineSpec({"h", [](const auto &d) { return (float)d.y; }});
+        // baseSpeedPlot.addLineSpec({"forward", [](const auto &d) { return (float)d[0]; }});
+        // baseSpeedPlot.addLineSpec({"sideways", [](const auto &d) { return (float)d[1]; }});
+        // baseSpeedPlot.addLineSpec({"turning", [](const auto &d) { return (float)d[2]; }});
+
+        // baseHeightPlot.drawVerticalGuide = true;
+        // baseHeightPlot.setMaxSize(bvhClips[selectedBvhClipIdx]->getFrameCount());
+        // baseSpeedPlot.drawVerticalGuide = true;
+        // baseSpeedPlot.setMaxSize(bvhClips[selectedBvhClipIdx]->getFrameCount());
+        // feetHeightPlot.drawVerticalGuide = true;
+        // feetHeightPlot.setMaxSize(bvhClips[selectedBvhClipIdx]->getFrameCount());
+        // feetVelocityPlot.drawVerticalGuide = true;
+        // feetVelocityPlot.setMaxSize(bvhClips[selectedBvhClipIdx]->getFrameCount());
+        // feetAccelerationPlot.drawVerticalGuide = true;
+        // feetAccelerationPlot.setMaxSize(bvhClips[selectedBvhClipIdx]->getFrameCount());
+        // for (uint i = 0; i < footMarkerNames.size(); i++) {
+        //     feetHeightPlot.addLineSpec({footMarkerNames[i], [i](const auto &d) { return (float)d[i]; }});
+        //     feetVelocityPlot.addLineSpec({footMarkerNames[i], [i](const auto &d) { return (float)d[i]; }});
+        //     feetAccelerationPlot.addLineSpec({footMarkerNames[i] + " x", [i](const auto &d) { return (float)d[3 * i]; }});
+        //     feetAccelerationPlot.addLineSpec({footMarkerNames[i] + " y", [i](const auto &d) { return (float)d[3 * i + 1]; }});
+        //     feetAccelerationPlot.addLineSpec({footMarkerNames[i] + " z", [i](const auto &d) { return (float)d[3 * i + 2]; }});
+        // }
+
+        // // extracting foot velocity and position
+        // auto *sk = bvhClips[selectedBvhClipIdx]->getModel();
+        // double t = 0;
+        // const auto &speed = crl::mocap::extractRootSpeedProfileFromBVHClip(bvhClips[selectedBvhClipIdx].get());
+
+        // std::vector<crl::V3D> footVelocityBackup;
+        // for (int i = 0; i < footMarkerNames.size(); i++)
+        //     footVelocityBackup.push_back(crl::V3D());
+
+        // for (int i = 0; i < bvhClips[selectedBvhClipIdx]->getFrameCount(); i++) {
+        //     sk->setState(&bvhClips[selectedBvhClipIdx]->getState(i));
+
+        //     baseHeightPlot.addData((float)t, sk->root->state.pos);
+        //     baseSpeedPlot.addData((float)t, speed.evaluate_linear(t));
+        //     crl::dVector footHeights(footMarkerNames.size());
+        //     crl::dVector footVelocities(footMarkerNames.size());
+        //     crl::dVector footAcceleration(footMarkerNames.size() * 3);
+        //     for (int j = 0; j < footMarkerNames.size(); j++) {
+        //         const auto &name = footMarkerNames[j];
+        //         if (const auto joint = sk->getMarkerByName(name.c_str())) {
+        //             crl::P3D eepos = joint->state.getWorldCoordinates(joint->endSites[0].endSiteOffset);
+        //             crl::V3D eevel = joint->state.getVelocityForPoint_local(joint->endSites[0].endSiteOffset);
+        //             footHeights[j] = eepos.y;
+        //             footVelocities[j] = eevel.norm();
+
+        //             if (i == 0) {
+        //                 footAcceleration[3 * j] = 0;
+        //                 footAcceleration[3 * j + 1] = 0;
+        //                 footAcceleration[3 * j + 2] = 0;
+        //             } else {
+        //                 crl::V3D acc = (eevel - footVelocityBackup[j]) / bvhClips[selectedBvhClipIdx]->getFrameTimeStep();
+        //                 footAcceleration[3 * j] = acc.x();
+        //                 footAcceleration[3 * j + 1] = acc.y();
+        //                 footAcceleration[3 * j + 2] = acc.z();
+        //             }
+
+        //             footVelocityBackup[j] = eevel;
+        //         }
+        //     }
+
+        //     feetHeightPlot.addData((float)t, footHeights);
+        //     feetVelocityPlot.addData((float)t, footVelocities);
+        //     feetAccelerationPlot.addData((float)t, footAcceleration);
+        //     t += bvhClips[selectedBvhClipIdx]->getFrameTimeStep();
+        // }
+
+        // // extracting swing sequences
+        // for (const auto &name : footMarkerNames) {
+        //     auto contactInfos = crl::mocap::extractFootContactStateFromBVHClip(  //
+        //         bvhClips[selectedBvhClipIdx].get(), name, footHeightThreshold, footVelocityThreshold);
+        //     footSteps[name] = crl::mocap::convertFootSwingSequenceFromFootContactStates(contactInfos);
+        // }
+        if (currentMatchClip == -1)
             return;
 
         footSteps.clear();
@@ -488,15 +616,15 @@ private:
         baseSpeedPlot.addLineSpec({"turning", [](const auto &d) { return (float)d[2]; }});
 
         baseHeightPlot.drawVerticalGuide = true;
-        baseHeightPlot.setMaxSize(bvhClips[selectedBvhClipIdx]->getFrameCount());
+        baseHeightPlot.setMaxSize(bvhClips[currentMatchClip]->getFrameCount());
         baseSpeedPlot.drawVerticalGuide = true;
-        baseSpeedPlot.setMaxSize(bvhClips[selectedBvhClipIdx]->getFrameCount());
+        baseSpeedPlot.setMaxSize(bvhClips[currentMatchClip]->getFrameCount());
         feetHeightPlot.drawVerticalGuide = true;
-        feetHeightPlot.setMaxSize(bvhClips[selectedBvhClipIdx]->getFrameCount());
+        feetHeightPlot.setMaxSize(bvhClips[currentMatchClip]->getFrameCount());
         feetVelocityPlot.drawVerticalGuide = true;
-        feetVelocityPlot.setMaxSize(bvhClips[selectedBvhClipIdx]->getFrameCount());
+        feetVelocityPlot.setMaxSize(bvhClips[currentMatchClip]->getFrameCount());
         feetAccelerationPlot.drawVerticalGuide = true;
-        feetAccelerationPlot.setMaxSize(bvhClips[selectedBvhClipIdx]->getFrameCount());
+        feetAccelerationPlot.setMaxSize(bvhClips[currentMatchClip]->getFrameCount());
         for (uint i = 0; i < footMarkerNames.size(); i++) {
             feetHeightPlot.addLineSpec({footMarkerNames[i], [i](const auto &d) { return (float)d[i]; }});
             feetVelocityPlot.addLineSpec({footMarkerNames[i], [i](const auto &d) { return (float)d[i]; }});
@@ -506,16 +634,16 @@ private:
         }
 
         // extracting foot velocity and position
-        auto *sk = bvhClips[selectedBvhClipIdx]->getModel();
+        auto *sk = bvhClips[currentMatchClip]->getModel();
         double t = 0;
-        const auto &speed = crl::mocap::extractRootSpeedProfileFromBVHClip(bvhClips[selectedBvhClipIdx].get());
+        const auto &speed = crl::mocap::extractRootSpeedProfileFromBVHClip(bvhClips[currentMatchClip].get());
 
         std::vector<crl::V3D> footVelocityBackup;
         for (int i = 0; i < footMarkerNames.size(); i++)
             footVelocityBackup.push_back(crl::V3D());
 
-        for (int i = 0; i < bvhClips[selectedBvhClipIdx]->getFrameCount(); i++) {
-            sk->setState(&bvhClips[selectedBvhClipIdx]->getState(i));
+        for (int i = 0; i < bvhClips[currentMatchClip]->getFrameCount(); i++) {
+            sk->setState(&bvhClips[currentMatchClip]->getState(i));
 
             baseHeightPlot.addData((float)t, sk->root->state.pos);
             baseSpeedPlot.addData((float)t, speed.evaluate_linear(t));
@@ -535,7 +663,7 @@ private:
                         footAcceleration[3 * j + 1] = 0;
                         footAcceleration[3 * j + 2] = 0;
                     } else {
-                        crl::V3D acc = (eevel - footVelocityBackup[j]) / bvhClips[selectedBvhClipIdx]->getFrameTimeStep();
+                        crl::V3D acc = (eevel - footVelocityBackup[j]) / bvhClips[currentMatchClip]->getFrameTimeStep();
                         footAcceleration[3 * j] = acc.x();
                         footAcceleration[3 * j + 1] = acc.y();
                         footAcceleration[3 * j + 2] = acc.z();
@@ -548,13 +676,13 @@ private:
             feetHeightPlot.addData((float)t, footHeights);
             feetVelocityPlot.addData((float)t, footVelocities);
             feetAccelerationPlot.addData((float)t, footAcceleration);
-            t += bvhClips[selectedBvhClipIdx]->getFrameTimeStep();
+            t += bvhClips[currentMatchClip]->getFrameTimeStep();
         }
 
         // extracting swing sequences
         for (const auto &name : footMarkerNames) {
             auto contactInfos = crl::mocap::extractFootContactStateFromBVHClip(  //
-                bvhClips[selectedBvhClipIdx].get(), name, footHeightThreshold, footVelocityThreshold);
+                bvhClips[currentMatchClip].get(), name, footHeightThreshold, footVelocityThreshold);
             footSteps[name] = crl::mocap::convertFootSwingSequenceFromFootContactStates(contactInfos);
         }
     }
@@ -574,10 +702,17 @@ private:
         Feature_std.setZero(DBfeatVecDim);
 
         int counter = 0;
-
+        accumulatedFrameNum.setZero(bvhClips.size());
         for (uint bvhidx = 0; bvhidx < bvhClips.size(); bvhidx++) {
             int clipFrameNum = bvhClips[bvhidx]->getFrameCount();
-
+            if (bvhidx == 0)
+            {
+                accumulatedFrameNum[bvhidx] = clipFrameNum;
+            }
+            else
+            {
+                accumulatedFrameNum[bvhidx] = accumulatedFrameNum[bvhidx - 1] + clipFrameNum;
+            }
             Eigen::MatrixXd footJointPos;
             footJointPos.setZero(clipFrameNum, 6);
             Eigen::MatrixXd footJointVel;
@@ -659,13 +794,27 @@ private:
         }
     }
 
-    int MMSearchforIndex(Eigen::RowVectorXd &inputFeatureQuery) {
-        Eigen::RowVectorXd normalizedQuery = (inputFeatureQuery.array() - Feature_mean.array()) / Feature_std.array();
-        Eigen::VectorXd norms = (DBMatching.rowwise() - inputFeatureQuery).rowwise().norm();
+    void MMSearchforIndex() { 
+        Eigen::RowVectorXd normalizedQuery = (currentQueryVector.array() - Feature_mean.array()) / Feature_std.array();
+        Eigen::VectorXd norms = (DBMatching.rowwise() - normalizedQuery).rowwise().norm();
         int index;
-        double minnorm = norms.minCoeff(&index);
-        return index;
+        double minnorm = norms.minCoeff(&index); 
+        currentMatchIdx = index;
+        MMSearchforClipandFrame();
     }
+
+    void MMSearchforClipandFrame()
+    {
+        for (int i = 0; i < accumulatedFrameNum.size(); i++)
+        {
+            if (currentMatchIdx < accumulatedFrameNum[i])
+            {
+                currentMatchClip = i;
+                currentMatchFrame = i > 0 ? currentMatchIdx - accumulatedFrameNum[i - 1] : currentMatchIdx;
+            }
+        }
+    }
+    // void find
 
     void processC3DClip() {
         if (selectedC3dClipIdx == -1)
@@ -849,14 +998,23 @@ private:
     Eigen::VectorXd Feature_mean;
     Eigen::VectorXd Feature_std;
     int DBfeatVecDim = 27;  // ?
+
     int currentMatchClip = -1;
     int currentMatchFrame = -1;
-    int currentMatIdx = 0;
-    int currentFramesPlayed = 0;
+    int currentMatchIdx = 0;
+    int nextMatchClip = -1;
+    int nextMatchFrame = -1;
+    int nextMatchIdx = 0;
+    int currentContinousFramesPlayed = 0;
     int maxContFramePlayed = 5;
     std::vector<std::string> DBmarkerNames = {"LeftFoot", "RightFoot", "Hips"};
-
+    Eigen::VectorXd accumulatedFrameNum;
     bool runMotionMatching;
     crl::mocap::Controller controller;
+    Eigen::VectorXd currentQueryVector;
+    bool firstInputGet = false;
+
+    // int desiredFPS = 30;
+    // double controllerOperateInterval;   // Time interval for controller take and process input
 };
 }  // namespace mocapApp

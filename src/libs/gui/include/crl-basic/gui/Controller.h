@@ -1,13 +1,15 @@
 #pragma once
 #include "crl-basic/gui/glUtils.h"
 #include <crl-basic/gui/camera.h>
+#include "mocap/MocapSkeletonState.h"
 
 namespace crl::mocap {
     // Game object class
     struct GameObject{
-        Eigen::Vector3d position = Eigen::Vector3d(0,0,0);
-        Eigen::Vector3d velocity = Eigen::Vector3d(0,0,0);
-        Eigen::MatrixXd trajectory = Eigen::MatrixXd::Zero(60,3);
+        crl::P3D position = crl::P3D(0,0,0);
+        crl::V3D velocity = crl::V3D(0,0,0);
+        Eigen::MatrixXd trajectoryPos = Eigen::MatrixXd::Zero(60,2);
+        Eigen::MatrixXd trajectoryDir = Eigen::MatrixXd::Zero(60,2);
     };
 
     class Controller {
@@ -20,20 +22,36 @@ namespace crl::mocap {
         };
         GameObject gameObject;
 
-        void run(GLFWwindow *window)
+        void run(GLFWwindow *window, const crl::P3D& hippos, const crl::V3D& hipvel, crl::gui::TrackingCamera &camera, Eigen::VectorXd& futureTrajInfo)
         {
             manipulatefromWSAD(window);
+            object = GameObject();
+            object.position = crl::P3D(hippos.x, hippos.y, hippos.z);
+            object.velocity = crl::V3D(hipvel.x(), hipvel.y(), hipvel.z());
+            updateTrajectory(camera);
+            obtainTrajectoryInfo(futureTrajInfo);
         }
-        void updateNewSkeletionInfo(const std::vector<crl::P3D>& markerPos, const std::vector<crl::V3D>& markerVel, const std::vector<crl::Quaternion> & marker)
+        // void updateNewSkeletionInfo(const std::vector<crl::P3D>& markerPos, const std::vector<crl::V3D>& markerVel, const std::vector<crl::Quaternion> & marker)
+        // {
+        //     matchedPos = markerPos; //  const to non const may error?
+        //     matchedVel = markerVel;
+        //     matchedQuat = marker; 
+        // }
+        // MocapSkeletonState* getUpdatedState(const MocapSkeletonState& state)
+        // {
+        //     MocapSkeletonState* updatedState = new MocapSkeletonState(state);
+        //     updatedState->setRootPosition(object.position);
+        //     // updatedState->setRootOrientation(desiredDir);
+        //     // updatedState->setRootVelocity();
+        //     return updatedState;
+        // }
+
+        void obtainTrajectoryInfo(Eigen::VectorXd& futureTrajInfo)
         {
-            matchedPos = markerPos; //  const to non const may error?
-            matchedVel = markerVel;
-            matchedQuat = marker; 
+            futureTrajInfo.setZero(12);
+            futureTrajInfo << object.trajectoryPos.row(20), object.trajectoryPos.row(40), object.trajectoryPos.row(60), object.trajectoryDir.row(20), object.trajectoryDir.row(40), object.trajectoryDir.row(60); // 要不要改成10 20 30
         }
-        public:
-        std::vector<crl::P3D> matchedPos;
-        std::vector<crl::V3D> matchedVel;
-        std::vector<crl::Quaternion> matchedQuat; // facing direction
+
         Eigen::VectorXd prevFeat;
         double speed;
         double speed_add_unit;
@@ -42,8 +60,9 @@ namespace crl::mocap {
         double max_speed = 5;
         double dir_angle = 0;
         double angle_change_unit;
+        GameObject object;
 
-        void updateTrajectory(crl::gui::TrackingCamera &camera, GameObject &object){
+        void updateTrajectory(crl::gui::TrackingCamera &camera){
             // camera facing direction
             Eigen::Vector2d camera_dir(camera.direction.x, camera.direction.z);
             camera_dir.normalized();
@@ -73,7 +92,7 @@ namespace crl::mocap {
 
 
             // Loop
-            for (int i=0; i < object.trajectory.rows(); i++){
+            for (int i=0; i < object.trajectoryPos.rows(); i++){
 
                 // Calculate current force based on spring-damper system equation
                 Eigen::Vector2d x = obj_pos - desiredDir;
@@ -86,10 +105,11 @@ namespace crl::mocap {
 
                 if (i == 0){
                     // Apply position and velocity to game object
-                    object.position = Eigen::Vector3d(obj_pos[0], 0, obj_pos[1]);
-                    object.velocity = Eigen::Vector3d(obj_vel[0], 0, obj_vel[1]);
+                    object.position = crl::P3D(obj_pos[0], 0, obj_pos[1]);
+                    object.velocity = crl::V3D(obj_vel[0], 0, obj_vel[1]);
                 }
-                object.trajectory.row(i) = Eigen::Vector3d(obj_pos[0], 0, obj_pos[1]);
+                object.trajectoryPos.row(i) = Eigen::Vector2d(obj_pos[0], obj_pos[1]);
+                object.trajectoryDir.row(i) = Eigen::Vector2d(obj_vel[0], obj_vel[1]).normalized();
             }
             camera.target.x =  object.position[0];
             camera.target.z =  object.position[2];
@@ -98,34 +118,32 @@ namespace crl::mocap {
         private:
         V3D key_dir;
         bool KEY_W = false, KEY_A = false, KEY_S = false, KEY_D = false;
-
         void manipulatefromWSAD(GLFWwindow *window)
         {
+            KEY_W = false;
+            KEY_A = false;
+            KEY_S = false;
+            KEY_D = false;
             if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
             {
-                speed += speed_add_unit * dt;
                 std::cout << "w pressed" << std::endl;
                 KEY_W = true;
             }
-            else if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+            if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
             {
-                speed -= speed_add_unit * dt;
                 std::cout << "s pressed" << std::endl;
                 KEY_S = true;
             }
-            else if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+            if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
             {
-                dir_angle -= angle_change_unit * dt;
                 std::cout << "a pressed" << std::endl;
                 KEY_A = true;
             }
-            else if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+            if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
             {
-                dir_angle += angle_change_unit* dt;
                 std::cout << "d pressed" << std::endl;
                 KEY_D = true;
             }
         }
-        // getstate
     };
 }
