@@ -160,6 +160,7 @@ public:
                 auto state = clip->getState(currentMatchFrame);
                 // TODO: need to update the hip position and velocity here
                 skel->setState(&state);
+                controller.getUpdatedState(state);   
                 // TODO: check the settings of camera target position, viewing angle.
                 if (followCharacter) {
                     camera.target.x = (float)clip->getModel()->root->state.pos.x;
@@ -167,7 +168,6 @@ public:
                 }
                 light.target.x() = (float)clip->getModel()->root->state.pos.x;
                 light.target.z() = (float)clip->getModel()->root->state.pos.z;
-                // auto updatedState = controller.getUpdatedState(state);   
             }
         }
     }

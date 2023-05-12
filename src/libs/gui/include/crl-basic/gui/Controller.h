@@ -39,17 +39,15 @@ namespace crl::mocap {
         //     matchedQuat = marker; 
         // }
 
-        MocapSkeletonState* getUpdatedState(const MocapSkeletonState& state)
+        void getUpdatedState(MocapSkeletonState& state)
         {
-            MocapSkeletonState* updatedState = new MocapSkeletonState(state);
-            updatedState->setRootPosition(object.position);
-            updatedState->setRootVelocity(object.velocity);
+            state.setRootPosition(object.position);
+            state.setRootVelocity(object.velocity);
 
             Eigen::Quaternion<double> quaternion;
             quaternion.w() = 0;
             quaternion.vec() = object.velocity.normalized();
-            updatedState->setRootOrientation(quaternion);
-            return updatedState;
+            state.setRootOrientation(quaternion);
         }
 
         void obtainTrajectoryInfo(Eigen::VectorXd& futureTrajInfo)
