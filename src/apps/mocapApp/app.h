@@ -183,13 +183,15 @@ public:
             if (auto *skel = clip->getModel()) {
                 crl::V3D markervel;
                 crl::P3D markerpos;
+                crl::Quaternion markerQuat;
                 std::string marker = "Hips";
                 if (const auto joint = skel -> getMarkerByName(marker.c_str())) {
                     markerpos = joint->state.pos;
                     markervel = joint->state.velocity;
+                    markerQuat = joint -> state.orientation;
                 } 
                 Eigen::VectorXd trajInfo;
-                controller.run(window, markerpos, markervel, camera, trajInfo);
+                controller.run(window, markerpos, markervel, markerQuat, camera, trajInfo);
                 updateQueryVector(trajInfo);
                 MMSearchforIndex();
                 currentContinousFramesPlayed = 0;
@@ -724,7 +726,7 @@ private:
             Eigen::MatrixXd hipJointPos;
             hipJointPos.setZero(clipFrameNum, 3);
             Eigen::MatrixXd trajPoseonGround;
-            trajPoseonGround.setZero(clipFrameNum, 2);
+            trajPoseonGround.setZero(clipFrameNum, 3);
             std::vector<crl::Quaternion> hipQuaternions;
 
             auto *sk = bvhClips[bvhidx]->getModel();
@@ -767,68 +769,148 @@ private:
                     }
                 }
                 trajPoseonGround(i, 0) = (footJointPos(i, 0) + footJointPos(i, 3)) / 2;
-                trajPoseonGround(i, 1) = (footJointPos(i, 2) + footJointPos(i, 5)) / 2;
+                trajPoseonGround(i, 1) = 0;
+                trajPoseonGround(i, 2) = (footJointPos(i, 2) + footJointPos(i, 5)) / 2;
             }
-            // compute future traj facing direction for every frame and save in DBMatching
-            assert(hipQuaternions.size() == clipFrameNum);
+            /* compute future traj orientation for every frame and save in DBMatching
+            // assert(hipQuaternions.size() == clipFrameNum);
 
+            // for (int i = 0; i < clipFrameNum; i++)
+            // {
+            //     crl::Quaternion localInverse = hipQuaternions[i].inverse();
+            //     Eigen::Vector3d positiveDirection(1, 0, 0);
+                
+
+                // if (i + 10 < clipFrameNum)
+                // {
+                //     crl::Quaternion q10 = hipQuaternions[i + 10];
+                //     crl::Quaternion q_relative_10 = q10 * localInverse;
+                //     Eigen::Vector3d face_direction_10 = q_relative_10 * positiveDirection;
+                //     face_direction_10(1) = 0;
+                //     face_direction_10.normalize();
+                //     DBMatching(counter + i, 6) = face_direction_10(0);
+                //     DBMatching(counter + i, 7) = face_direction_10(2);
+                // }
+                // if (i + 20 < clipFrameNum)
+                // {
+                //     crl::Quaternion q20 = hipQuaternions[i + 20];
+                //     crl::Quaternion q_relative_20 = q20 * localInverse;
+                //     Eigen::Vector3d face_direction_20 = q_relative_20 * positiveDirection;
+                //     face_direction_20(1) = 0;
+                //     face_direction_20.normalize();
+                //     DBMatching(counter + i, 8) = face_direction_20(0);
+                //     DBMatching(counter + i, 9) = face_direction_20(2);
+                // }
+                // if (i + 30 < clipFrameNum)
+                // {
+                //     crl::Quaternion q30 = hipQuaternions[i + 30];
+                //     crl::Quaternion q_relative_30 = q30 * localInverse;
+                //     Eigen::Vector3d face_direction_30 = q_relative_30 * positiveDirection;
+                //     face_direction_30(1) = 0;
+                //     face_direction_30.normalize();
+                //     DBMatching(counter + i, 10) = face_direction_30(0);
+                //     DBMatching(counter + i, 11) = face_direction_30(2);
+                // }
+            // }*/
+
+            // future trajectory positions
             for (int i = 0; i < clipFrameNum; i++)
             {
                 crl::Quaternion localInverse = hipQuaternions[i].inverse();
-                Eigen::Vector3d positiveDirection(1, 0, 0);
-                
+                Eigen::Vector3d trajPos = trajPoseonGround.row(i);
                 if (i + 10 < clipFrameNum)
                 {
-                    crl::Quaternion q10 = hipQuaternions[i + 10];
-                    crl::Quaternion q_relative_10 = q10 * localInverse;
-                    Eigen::Vector3d face_direction_10 = q_relative_10 * positiveDirection;
-                    face_direction_10(1) = 0;
-                    face_direction_10.normalize();
-                    DBMatching(counter + i, 6) = face_direction_10(0);
-                    DBMatching(counter + i, 7) = face_direction_10(2);
+                    Eigen::Vector3d trajPos10 = trajPoseonGround.row(i + 10);
+                    Eigen::Vector3d localRelativePos10 = localInverse * (trajPos10 - trajPos);
+                    DBMatching(counter + i, 0) = localRelativePos10(0);
+                    DBMatching(counter + i, 1) = localRelativePos10(2);
+                }
+                else
+                {
+                    break;
                 }
                 if (i + 20 < clipFrameNum)
                 {
-                    crl::Quaternion q20 = hipQuaternions[i + 20];
-                    crl::Quaternion q_relative_20 = q20 * localInverse;
-                    Eigen::Vector3d face_direction_20 = q_relative_20 * positiveDirection;
-                    face_direction_20(1) = 0;
-                    face_direction_20.normalize();
-                    DBMatching(counter + i, 8) = face_direction_20(0);
-                    DBMatching(counter + i, 9) = face_direction_20(2);
+                    Eigen::Vector3d trajPos20 = trajPoseonGround.row(i + 20);
+                    Eigen::Vector3d localRelativePos20 = localInverse * (trajPos20 - trajPos);
+                    DBMatching(counter + i, 2) = localRelativePos20(0);
+                    DBMatching(counter + i, 3) = localRelativePos20(2);
+                }
+                else
+                {
+                    continue;
                 }
                 if (i + 30 < clipFrameNum)
                 {
-                    crl::Quaternion q30 = hipQuaternions[i + 30];
-                    crl::Quaternion q_relative_30 = q30 * localInverse;
-                    Eigen::Vector3d face_direction_30 = q_relative_30 * positiveDirection;
-                    face_direction_30(1) = 0;
-                    face_direction_30.normalize();
-                    DBMatching(counter + i, 10) = face_direction_30(0);
-                    DBMatching(counter + i, 11) = face_direction_30(2);
+                    Eigen::Vector3d trajPos30 = trajPoseonGround.row(i + 30);
+                    Eigen::Vector3d localRelativePos30 = localInverse * (trajPos30 - trajPos);
+                    DBMatching(counter + i, 4) = localRelativePos30(0);
+                    DBMatching(counter + i, 5) = localRelativePos30(2);
                 }
-            }
+            }    
 
+            // future trajectory orientations
+            for (int i = 0; i < clipFrameNum; i++)
+            {
+                crl::Quaternion localInverse = hipQuaternions[i].inverse();
+                if (i + 10 < clipFrameNum)
+                {
+                    Eigen::Vector3d hipVel = hipJointVel.row(i + 10);
+                    Eigen::Vector3d localRelativeDir10 = localInverse * hipVel;
+                    localRelativeDir10.normalize();
+                    DBMatching(counter + i, 6) = localRelativeDir10(0);
+                    DBMatching(counter + i, 7) = localRelativeDir10(2);
+                }
+                else
+                {
+                    break;
+                }
+                if (i + 20 < clipFrameNum)
+                {
+                    Eigen::Vector3d hipVel = hipJointVel.row(i + 20);
+                    Eigen::Vector3d localRelativeDir20 = localInverse * hipVel;
+                    localRelativeDir20.normalize();
+                    DBMatching(counter + i, 8) = localRelativeDir20(0);
+                    DBMatching(counter + i, 9) = localRelativeDir20(2);
+                }
+                else
+                {
+                    continue;
+                }
+                if (i + 30 < clipFrameNum)
+                {
+                    Eigen::Vector3d hipVel = hipJointVel.row(i + 30);
+                    Eigen::Vector3d localRelativeDir30 = localInverse * hipVel;
+                    localRelativeDir30.normalize();
+                    DBMatching(counter + i, 10) = localRelativeDir30(0);
+                    DBMatching(counter + i, 11) = localRelativeDir30(2);
+                }
+            }    
+
+            // foot joint
+            for (int i = 0; i < clipFrameNum; i++)
+            {
+                crl::Quaternion localInverse = hipQuaternions[i].inverse();
+                Eigen::Vector3d leftFoot = footJointPos.row(i).head(3);
+                Eigen::Vector3d rightFoot = footJointPos.row(i).tail(3);
+                Eigen::Vector3d hipPos = hipJointPos.row(i);
+                footJointPos.row(i).segment(0, 3) = localInverse * (leftFoot - hipPos);
+                footJointPos.row(i).segment(3, 3) = localInverse * (rightFoot - hipPos);
+            }
             // compute foot joint velocity and hip joint velocity local to character
             for (int i = 0; i < clipFrameNum; i++)
             {
-                crl::Quaternion hipQuat = hipQuaternions[i];
-                Eigen::Matrix3d local_rot_mat_transpose = hipQuat.toRotationMatrix().transpose();
-                Eigen::Vector3d localHipVel = local_rot_mat_transpose * hipJointVel.row(i).transpose();
-                Eigen::Vector3d localLeftFootVelocity = local_rot_mat_transpose * footJointVel.row(i).head(3).transpose();
-                Eigen::Vector3d localRightFootVelocity = local_rot_mat_transpose * footJointVel.row(i).tail(3).transpose();
+                crl::Quaternion localInverse = hipQuaternions[i].inverse();
+                Eigen::Vector3d localHipVel = localInverse * hipJointVel.row(i);
+                Eigen::Vector3d localLeftFootVelocity = localInverse * footJointVel.row(i).head(3);
+                Eigen::Vector3d localRightFootVelocity = localInverse * footJointVel.row(i).tail(3);
                 hipJointVel.row(i) << localHipVel;
                 footJointVel.row(i).segment(0, 3) = localLeftFootVelocity;
-                footJointVel.row(i).segment(3, 3) = localRightFootVelocity;
+                footJointVel.row(i).segment(3, 3) = localRightFootVelocity;   
             }
         
             // defined for 30Hz, stores the future 10\20\30 frames
-            // add future trajectory position
-            DBMatching.block(counter, 0, clipFrameNum - 10, 2) = trajPoseonGround.block(10, 0, clipFrameNum - 10, 2) - trajPoseonGround.block(0, 0, clipFrameNum - 10, 2);
-            DBMatching.block(counter, 2, clipFrameNum - 20, 2) = trajPoseonGround.block(20, 0, clipFrameNum - 20, 2) - trajPoseonGround.block(0, 0, clipFrameNum - 20, 2);
-            DBMatching.block(counter, 4, clipFrameNum - 30, 2) = trajPoseonGround.block(30, 0, clipFrameNum - 30, 2) - trajPoseonGround.block(0, 0, clipFrameNum - 30, 2);
-            DBMatching.block(counter, 12, clipFrameNum, 3) = footJointPos.block(0, 0, clipFrameNum, 3) - hipJointPos;
-            DBMatching.block(counter, 15, clipFrameNum, 3) = footJointPos.block(0, 3, clipFrameNum, 3) - hipJointPos;
+            DBMatching.block(counter, 12, clipFrameNum, 6) = footJointPos;
             DBMatching.block(counter, 18, clipFrameNum, 6) = footJointVel;
             DBMatching.block(counter, 24, clipFrameNum, 3) = hipJointVel;
             counter += clipFrameNum;
