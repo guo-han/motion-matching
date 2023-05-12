@@ -306,14 +306,17 @@ public:
         //     if (selectedMarkerIdx > -1)
         //         crl::gui::drawSphere(c3dClips[selectedC3dClipIdx]->getModel()->getMarker(selectedMarkerIdx)->state.pos, 0.05, shader, crl::V3D(1, 0, 0), 0.5);
         // }
-        if (currentMatchClip > -1)
+        if (currentMatchClip > -1){
             bvhClips[currentMatchClip]->draw(shader, currentMatchFrame);
+            controller.drawTrajectory(shader);
+        }
         else if (bvhClips.size() != 0) {
             bvhClips[0]->draw(shader, 0);
             currentMatchClip = 0;
             currentMatchFrame = 0;
             currentMatchIdx = 0;
             processBVHClip();
+            controller.drawTrajectory(shader);
         }
     }
 

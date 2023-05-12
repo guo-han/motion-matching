@@ -8,6 +8,7 @@ namespace crl::mocap {
     struct GameObject{
         crl::P3D position = crl::P3D(0,0,0);
         crl::V3D velocity = crl::V3D(0,0,0);
+        crl::V3D angularVel = crl::V3D(0,0,0);
         Eigen::MatrixXd trajectoryPos = Eigen::MatrixXd::Zero(60,2);
         Eigen::MatrixXd trajectoryDir = Eigen::MatrixXd::Zero(60,2);
     };
@@ -30,20 +31,26 @@ namespace crl::mocap {
             updateTrajectory(camera);
             obtainTrajectoryInfo(futureTrajInfo);
         }
+
         // void updateNewSkeletionInfo(const std::vector<crl::P3D>& markerPos, const std::vector<crl::V3D>& markerVel, const std::vector<crl::Quaternion> & marker)
         // {
         //     matchedPos = markerPos; //  const to non const may error?
         //     matchedVel = markerVel;
         //     matchedQuat = marker; 
         // }
-        // MocapSkeletonState* getUpdatedState(const MocapSkeletonState& state)
-        // {
-        //     MocapSkeletonState* updatedState = new MocapSkeletonState(state);
-        //     updatedState->setRootPosition(object.position);
-        //     // updatedState->setRootOrientation(desiredDir);
-        //     // updatedState->setRootVelocity();
-        //     return updatedState;
-        // }
+
+        MocapSkeletonState* getUpdatedState(const MocapSkeletonState& state)
+        {
+            MocapSkeletonState* updatedState = new MocapSkeletonState(state);
+            updatedState->setRootPosition(object.position);
+            updatedState->setRootVelocity(object.velocity);
+
+            Eigen::Quaternion<double> quaternion;
+            quaternion.w() = 0;
+            quaternion.vec() = object.velocity.normalized()
+            updatedState->setRootOrientation(quaternion);
+            return updatedState;
+        }
 
         void obtainTrajectoryInfo(Eigen::VectorXd& futureTrajInfo)
         {
@@ -55,6 +62,26 @@ namespace crl::mocap {
                               object.trajectoryDir(39,0), object.trajectoryDir(39,1),
                               object.trajectoryDir(59,0), object.trajectoryDir(59,1); //要不要改成10 20 30
             
+        }
+
+        void drawTrajectory(const crl::gui::Shader &shader){
+            Eigen::VectorXd traj_info;
+            obtainTrajectoryInfo(traj_info);
+
+            crl::P3D pose20 = crl::P3D(traj_info[0],0,traj_info[1]);
+            crl::P3D pose40 = crl::P3D(traj_info[2],0,traj_info[3]);
+            crl::P3D pose60 = crl::P3D(traj_info[4],0,traj_info[5]);
+            crl::V3D vel20 = crl::V3D(traj_info[6],0,traj_info[7]).normalized() *0.5;
+            crl::V3D vel40 = crl::V3D(traj_info[8],0,traj_info[9]).normalized() *0.5;
+            crl::V3D vel60 = crl::V3D(traj_info[10],0,traj_info[11]).normalized() *0.5;
+            // draw pose
+            crl::gui::drawSphere(pose20, 0.05, shader, Eigen::Vector3d(1, 0, 0), 1.0);
+            crl::gui::drawSphere(pose40, 0.05, shader, Eigen::Vector3d(1, 0, 0), 1.0);
+            crl::gui::drawSphere(pose60, 0.05, shader, Eigen::Vector3d(1, 0, 0), 1.0);
+
+            crl::gui::drawArrow3d(pose20, vel20, 0.03, shader, Eigen::Vector3d(1, 0, 0), 1.0);
+            crl::gui::drawArrow3d(pose40, vel40, 0.03, shader, Eigen::Vector3d(1, 0, 0), 1.0);
+            crl::gui::drawArrow3d(pose60, vel60, 0.03, shader, Eigen::Vector3d(1, 0, 0), 1.0);
         }
 
         Eigen::VectorXd prevFeat;
@@ -69,22 +96,24 @@ namespace crl::mocap {
 
         void updateTrajectory(crl::gui::TrackingCamera &camera){
             // camera facing direction
-            Eigen::Vector2d camera_dir(camera.direction.x, camera.direction.z);
+            glm::vec3 orientation = camera.getOrientation();
+            Eigen::Vector2d camera_dir(orientation.x, orientation.z);
             camera_dir.normalized();
 
             // set move direction based keyboard input
             Eigen::Vector2d key_dir(0,0);
             if (KEY_W) key_dir[0] += 1;
-            if (KEY_A) key_dir[1] += 1;
+            if (KEY_A) key_dir[1] -= 1;
             if (KEY_S) key_dir[0] -= 1;
-            if (KEY_D) key_dir[1] -= 1;
+            if (KEY_D) key_dir[1] += 1;
             key_dir.normalized();
             Eigen::Matrix2d rot_matrix;
             rot_matrix << key_dir[0], -key_dir[1],
                           key_dir[1], key_dir[0];
             // Desired velocity and direction from keyboard input
             Eigen::Vector2d desiredDir = rot_matrix * camera_dir;
-            Eigen::Vector2d desiredVel = desiredDir * 10.0f; // scale to maximum speed
+            if (key_dir.norm() == 0) desiredDir << object.velocity[0], object.velocity[2];
+            Eigen::Vector2d desiredVel = desiredDir * 5.0f; // scale to maximum speed
 
             // System state
             Eigen::Vector2d obj_pos(object.position[0], object.position[2]);
@@ -96,7 +125,7 @@ namespace crl::mocap {
             float b = 0.1f;
 
 
-            // Loop
+            // Loop over future 60 frames
             for (int i=0; i < object.trajectoryPos.rows(); i++){
 
                 // Calculate current force based on spring-damper system equation
@@ -112,6 +141,7 @@ namespace crl::mocap {
                     // Apply position and velocity to game object
                     object.position = crl::P3D(obj_pos[0], 0, obj_pos[1]);
                     object.velocity = crl::V3D(obj_vel[0], 0, obj_vel[1]);
+                    object.angularVel = crl::V3D(0,1,0) * acos((obj_pos.normalized()).dot(obj_vel.normalized()));
                 }
                 object.trajectoryPos.row(i) = Eigen::Vector2d(obj_pos[0], obj_pos[1]);
                 object.trajectoryDir.row(i) = Eigen::Vector2d(obj_vel[0], obj_vel[1]).normalized();
