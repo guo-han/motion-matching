@@ -47,7 +47,7 @@ namespace crl::mocap {
 
             Eigen::Quaternion<double> quaternion;
             quaternion.w() = 0;
-            quaternion.vec() = object.velocity.normalized()
+            quaternion.vec() = object.velocity.normalized();
             updatedState->setRootOrientation(quaternion);
             return updatedState;
         }
