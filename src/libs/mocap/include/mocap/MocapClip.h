@@ -66,6 +66,20 @@ public:
             model_->draw(shader, alpha);
         }
     }
+    void draw(const gui::Shader &shader, uint frameIdx, Controller &controller, float alpha = 1.0) {
+        if (frameIdx >= frameCount_) {
+            Logger::consolePrint(V3D(1, 0, 0), "Wrong frame index %d > total frame count in clip = %d\n", frameIdx, frameCount_);
+            frameIdx %= frameCount_;
+        }
+
+        // set skeleton
+        if (model_) {
+            StateType currentState = getState(frameIdx);
+            controller.getUpdatedState(currentState);
+            model_->setState(&currentState);
+            model_->draw(shader, alpha);
+        }
+    }
 };
 
 class BVHClip : public MocapClip<MocapSkeleton> {

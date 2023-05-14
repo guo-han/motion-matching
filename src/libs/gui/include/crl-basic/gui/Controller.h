@@ -40,13 +40,17 @@ namespace crl::mocap {
 
         void getUpdatedState(MocapSkeletonState& state)
         {
-            state.setRootPosition(object.position);
-            state.setRootVelocity(object.velocity);
+            crl::P3D root_p = state.getRootPosition();
+            crl::V3D root_v = state.getRootVelocity();
+            Eigen::Quaternion root_o = state.getRootOrientation();
 
-            Eigen::Quaternion<double> quaternion;
-            quaternion.w() = 0;
-            quaternion.vec() = object.velocity.normalized();
-            state.setRootOrientation(quaternion);
+            state.setRootPosition(crl::P3D(object.position[0], root_p[1], object.position[2]));
+            state.setRootVelocity(crl::V3D(object.velocity[0], root_v[1], object.velocity[2]));
+            // TODO: set quaternion according to local orientation
+            // Eigen::Quaternion<double> quaternion;
+            // quaternion.w() = 0;
+            // quaternion.vec() = object.velocity.normalized();
+            // state.setRootOrientation(quaternion);
         }
 
         void obtainTrajectoryInfo(Eigen::VectorXd& futureTrajInfo)
@@ -74,15 +78,12 @@ namespace crl::mocap {
         }
 
         void drawTrajectory(const crl::gui::Shader &shader){
-            Eigen::VectorXd traj_info;
-            obtainTrajectoryInfo(traj_info);
-
-            crl::P3D pose20 = crl::P3D(traj_info[0],0,traj_info[1]);
-            crl::P3D pose40 = crl::P3D(traj_info[2],0,traj_info[3]);
-            crl::P3D pose60 = crl::P3D(traj_info[4],0,traj_info[5]);
-            crl::V3D vel20 = crl::V3D(traj_info[6],0,traj_info[7]).normalized() *0.5;
-            crl::V3D vel40 = crl::V3D(traj_info[8],0,traj_info[9]).normalized() *0.5;
-            crl::V3D vel60 = crl::V3D(traj_info[10],0,traj_info[11]).normalized() *0.5;
+            crl::P3D pose20 = crl::P3D(object.trajectoryPos(19,0), 0, object.trajectoryPos(19,2));
+            crl::P3D pose40 = crl::P3D(object.trajectoryPos(39,0), 0, object.trajectoryPos(39,2));
+            crl::P3D pose60 = crl::P3D(object.trajectoryPos(59,0), 0, object.trajectoryPos(59,2));
+            crl::V3D vel20 = object.trajectoryDir.row(19);
+            crl::V3D vel40 = object.trajectoryDir.row(39);
+            crl::V3D vel60 = object.trajectoryDir.row(59);
             // draw pose
             crl::gui::drawSphere(pose20, 0.05, shader, Eigen::Vector3d(1, 0, 0), 1.0);
             crl::gui::drawSphere(pose40, 0.05, shader, Eigen::Vector3d(1, 0, 0), 1.0);
@@ -113,8 +114,7 @@ namespace crl::mocap {
             Eigen::Vector2d desiredDir = rot_matrix * camera_dir;
             // Eigen::Vector3d desiredDir(desiredDir2d[0], 0, desiredDir2d[1]);
             // Eigen::Vector3d desiredVel(desiredVel2d[0], 0, desiredVel2d[1]); // scale to maximum speed
-            if (key_dir.norm() == 0) desiredDir << object.velocity[0], object.velocity[2];
-            Eigen::Vector2d desiredVel = desiredDir * 5.0f; // scale to maximum speed
+            Eigen::Vector2d desiredVel = desiredDir * 10.0f; // scale to maximum speed
 
             // System state
             Eigen::Vector2d obj_pos(object.position[0], object.position[2]);
@@ -122,15 +122,15 @@ namespace crl::mocap {
             // Eigen::Vector3d obj_pos = object.position;
             // Eigen::Vector3d obj_vel = object.velocity;
             // Time step and spring damper parameters
-            float dt = 0.1f;
-            float k = 0.1f;
-            float b = 0.1f;
+            float dt = 0.0166f;
+            float k = 20.0f;
+            float b = 40.0f;
 
             // Loop over future 60 frames
             for (int i=0; i < object.trajectoryPos.rows(); i++){
 
                 // Calculate current force based on spring-damper system equation
-                Eigen::Vector2d x = obj_pos - desiredDir;
+                Eigen::Vector2d x = - desiredDir;
                 Eigen::Vector2d v = obj_vel - desiredVel;
                 Eigen::Vector2d force = (x * (-k)) + (v * (-b));
                 // Eigen::Vector3d x = obj_pos - desiredDir;

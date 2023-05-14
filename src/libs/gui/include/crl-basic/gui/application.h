@@ -87,7 +87,7 @@ public:
     //--- Process
     bool useSeparateProcessThread = false;
     std::thread processThread;
-    bool processIsRunning = false;
+    bool processIsRunning = true;
 
     //--- Console
     bool automanageConsole = false;

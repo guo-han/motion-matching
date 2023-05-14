@@ -158,10 +158,10 @@ public:
             if (auto *skel = clip->getModel()) {
                 // controller get state state type
                 auto state = clip->getState(currentMatchFrame);
-                // TODO: need to update the hip position and velocity here
+                // update the hip position and velocity
+                controller.getUpdatedState(state);
                 skel->setState(&state);
-                controller.getUpdatedState(state);   
-                // TODO: check the settings of camera target position, viewing angle.
+                // setting new camera target position, viewing angle.
                 if (followCharacter) {
                     camera.target.x = (float)clip->getModel()->root->state.pos.x;
                     camera.target.z = (float)clip->getModel()->root->state.pos.z;
@@ -201,7 +201,6 @@ public:
                 std::cout << "getModelError" << std::endl;
             }
         }
-        currentMatchFrame = nextMatchFrame;
     }
     
     void restart() override {
@@ -237,7 +236,7 @@ public:
         //     }
         // }
         if (currentMatchClip > -1) {
-            bvhClips[currentMatchClip]->draw(shader, currentMatchFrame);
+            bvhClips[currentMatchClip]->draw(shader, currentMatchFrame, controller);
         }
     }
 
@@ -309,7 +308,7 @@ public:
         //         crl::gui::drawSphere(c3dClips[selectedC3dClipIdx]->getModel()->getMarker(selectedMarkerIdx)->state.pos, 0.05, shader, crl::V3D(1, 0, 0), 0.5);
         // }
         if (currentMatchClip > -1){
-            bvhClips[currentMatchClip]->draw(shader, currentMatchFrame);
+            bvhClips[currentMatchClip]->draw(shader, currentMatchFrame, controller);
             controller.drawTrajectory(shader);
         }
         else if (bvhClips.size() != 0) {
@@ -907,7 +906,7 @@ private:
                 Eigen::Vector3d localHipVel = localInverse * hipJointVel.row(i);
                 Eigen::Vector3d localLeftFootVelocity = localInverse * footJointVel.row(i).head(3);
                 Eigen::Vector3d localRightFootVelocity = localInverse * footJointVel.row(i).tail(3);
-                hipJointVel.row(i) << localHipVel;
+                hipJointVel.row(i) = localHipVel;
                 footJointVel.row(i).segment(0, 3) = localLeftFootVelocity;
                 footJointVel.row(i).segment(3, 3) = localRightFootVelocity;   
             }
