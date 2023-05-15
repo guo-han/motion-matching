@@ -9,6 +9,7 @@
 #include "mocap/MocapSkeletonState.h"
 #include "mocap/PlotUtils.h"
 #include "mocap/TimelineUtils.h"
+#include "mocap/MotionMatching.h"
 
 namespace mocapApp {
 
@@ -35,17 +36,17 @@ public:
 
         if (selectedBvhClipIdx > -1) {
             auto &clip = bvhClips[selectedBvhClipIdx];
-            if (auto *skel = clip->getModel()) {
-                auto state = clip->getState(frameIdx);
-                skel->setState(&state);
-                if (followCharacter) {
-                    camera.target.x = (float)clip->getModel()->root->state.pos.x;
-                    camera.target.z = (float)clip->getModel()->root->state.pos.z;
-                }
-                light.target.x() = (float)clip->getModel()->root->state.pos.x;
-                light.target.z() = (float)clip->getModel()->root->state.pos.z;
-            }
-            if (++frameIdx >= clip->getFrameCount())
+            // if (auto *skel = clip->getModel()) {
+            //     auto state = clip->getState(frameIdx);
+            //     skel->setState(&state);
+            //     if (followCharacter) {
+            //         camera.target.x = (float)clip->getModel()->root->state.pos.x;
+            //         camera.target.z = (float)clip->getModel()->root->state.pos.z;
+            //     }
+            //     light.target.x() = (float)clip->getModel()->root->state.pos.x;
+            //     light.target.z() = (float)clip->getModel()->root->state.pos.z;
+            // }
+            if (++frameIdx >= clip->getFrameCount()*5)
                 frameIdx = 0;
         }
 
@@ -77,7 +78,16 @@ public:
 
     void drawShadowCastingObjects(const crl::gui::Shader &shader) override {
         if (selectedBvhClipIdx > -1) {
-            bvhClips[selectedBvhClipIdx]->draw(shader, frameIdx);
+            // auto &clip = bvhClips[selectedBvhClipIdx];
+            // auto *skel = clip->getModel();
+            // crl::mocap::Inertialization inertBlender(clip->getModel());
+
+            // inertBlender.blend(clip->getState(1000), clip->getState(1001), clip->getState(1200),clip->getState(1201));
+
+            // skel->setState(inertBlender.evaluate(frameIdx/(30.0)));
+            // skel->draw(shader);
+
+            // bvhClips[selectedBvhClipIdx]->draw(shader, frameIdx);
         }
         if (selectedC3dClipIdx > -1) {
             c3dClips[selectedC3dClipIdx]->draw(shader, frameIdx);
@@ -93,8 +103,22 @@ public:
     }
 
     void drawObjectsWithoutShadows(const crl::gui::Shader &shader) override {
-        if (selectedBvhClipIdx > -1)
-            bvhClips[selectedBvhClipIdx]->draw(shader, frameIdx);
+        if (selectedBvhClipIdx > -1) {
+            auto &clip = bvhClips[selectedBvhClipIdx];
+            auto *skel = clip->getModel();
+            crl::mocap::Inertialization inertBlender(skel);
+            inertBlender.blend(clip->getState((frameIdx/5)), clip->getState((frameIdx/5)+1),clip->getState((frameIdx/5)+2),clip->getState((frameIdx/5)+3));
+            skel->setState(inertBlender.evaluate( (frameIdx - (frameIdx/5)*5)/(5.0/0.3)  ));
+            
+            skel->draw(shader);
+                if (followCharacter) {
+                    camera.target.x = skel->root->state.pos.x;
+                    camera.target.z = skel->root->state.pos.z;
+                }
+                light.target.x() = (float)clip->getModel()->root->state.pos.x;
+                light.target.z() = (float)clip->getModel()->root->state.pos.z;
+        }
+            // bvhClips[selectedBvhClipIdx]->draw(shader, frameIdx);
         if (selectedC3dClipIdx > -1) {
             c3dClips[selectedC3dClipIdx]->draw(shader, frameIdx);
 

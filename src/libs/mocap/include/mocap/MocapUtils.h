@@ -56,7 +56,7 @@ std::string vec3tos(const glm::vec3 &vector);
  *   \param xRot
  *   \param xRot
  *   \param xRot
- *   \note This function is moved to as the member function of BvhJoint class
+ *   \note This function is overrided by the member function of BvhJoint class
  */
 //Transform_t getTransformFromMotionData(double zRot, double xRot, double yRot);
 
@@ -67,7 +67,7 @@ std::string vec3tos(const glm::vec3 &vector);
  *   \param xRot
  *   \param xRot
  *   \param xRot
- *   \note This function is moved to as the member function of BvhJoint class
+ *   \note This function is is overrided by the member function of BvhJoint class
  */
 //Transform_t getTransformFromMotionData(double xTrans, double yTrans, double zTrans, double zRot, double xRot, double yRot);
 
