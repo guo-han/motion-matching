@@ -19,11 +19,19 @@ namespace crl::mocap {
     class Controller {
         public:
 
-        void run(GLFWwindow *window, const crl::P3D& hippos, const crl::V3D& hipvel, const crl::Quaternion& hipquat, crl::gui::TrackingCamera &camera, Eigen::VectorXd& futureTrajInfo)
+        void run(GLFWwindow *window, const crl::P3D& hippos, const crl::V3D& hipvel, const crl::Quaternion& hipquat, crl::gui::TrackingCamera &camera, Eigen::VectorXd& futureTrajInfo, bool &inputGet)
         {
             manipulatefromWSAD(window);
             object.position = crl::P3D(hippos.x, hippos.y, hippos.z);
-            object.velocity = crl::V3D(hipvel.x(), hipvel.y(), hipvel.z());
+            if(!KEY_W && !KEY_A && !KEY_S && !KEY_D){
+                // object.velocity = crl::V3D(0, 0, 0);
+                object.velocity = crl::V3D(hipvel.x(), hipvel.y(), hipvel.z());
+                inputGet = false;
+            }
+            else{
+               object.velocity = crl::V3D(hipvel.x(), hipvel.y(), hipvel.z());
+               inputGet = true;
+            }
             object.originalPosition = Eigen::Vector3d(hippos.x, 0, hippos.z);
             object.originalVelocity = Eigen::Vector3d(hipvel.x(), 0, hipvel.z());
             object.orientation = hipquat;
@@ -81,9 +89,9 @@ namespace crl::mocap {
             crl::P3D pose20 = crl::P3D(object.trajectoryPos(19,0), 0, object.trajectoryPos(19,2));
             crl::P3D pose40 = crl::P3D(object.trajectoryPos(39,0), 0, object.trajectoryPos(39,2));
             crl::P3D pose60 = crl::P3D(object.trajectoryPos(59,0), 0, object.trajectoryPos(59,2));
-            crl::V3D vel20 = object.trajectoryDir.row(19);
-            crl::V3D vel40 = object.trajectoryDir.row(39);
-            crl::V3D vel60 = object.trajectoryDir.row(59);
+            crl::V3D vel20 = crl::V3D(object.trajectoryDir.row(19));
+            crl::V3D vel40 = crl::V3D(object.trajectoryDir.row(39));
+            crl::V3D vel60 = crl::V3D(object.trajectoryDir.row(59));
             // draw pose
             crl::gui::drawSphere(pose20, 0.05, shader, Eigen::Vector3d(1, 0, 0), 1.0);
             crl::gui::drawSphere(pose40, 0.05, shader, Eigen::Vector3d(1, 0, 0), 1.0);
@@ -114,7 +122,7 @@ namespace crl::mocap {
             Eigen::Vector2d desiredDir = rot_matrix * camera_dir;
             // Eigen::Vector3d desiredDir(desiredDir2d[0], 0, desiredDir2d[1]);
             // Eigen::Vector3d desiredVel(desiredVel2d[0], 0, desiredVel2d[1]); // scale to maximum speed
-            Eigen::Vector2d desiredVel = desiredDir * 10.0f; // scale to maximum speed
+            Eigen::Vector2d desiredVel = desiredDir * 3.3f; // scale to maximum speed
 
             // System state
             Eigen::Vector2d obj_pos(object.position[0], object.position[2]);

@@ -191,15 +191,25 @@ public:
                     markerQuat = joint -> state.orientation;
                 } 
                 Eigen::VectorXd trajInfo;
-                controller.run(window, markerpos, markervel, markerQuat, camera, trajInfo);
-                updateQueryVector(trajInfo);
-                MMSearchforIndex();
-                currentContinousFramesPlayed = 0;
+                controller.run(window, markerpos, markervel, markerQuat, camera, trajInfo, inputGet);
+                if(inputGet){
+                    updateQueryVector(trajInfo);
+                    MMSearchforIndex();
+                    currentContinousFramesPlayed = 0;
+                }
+                else{
+                    // currentMatchFrame = 0;
+                    // currentMatchIdx = 0;
+                }
             }
             else
             {
                 std::cout << "getModelError" << std::endl;
             }
+        }
+        else if(inputGet){
+            currentMatchFrame = nextMatchFrame;
+            currentMatchIdx++;
         }
     }
     
@@ -935,7 +945,8 @@ private:
         Eigen::VectorXd norms = (DBMatching.rowwise() - normalizedQuery).rowwise().norm();
         int index;
         double minnorm = norms.minCoeff(&index); 
-        currentMatchIdx = index;
+        currentMatchIdx = currentMatchIdx==index? currentMatchIdx+1:index;
+        // currentMatchIdx = index;
         MMSearchforClipandFrame();
     }
 
@@ -1143,13 +1154,14 @@ private:
     int nextMatchFrame = -1;
     int nextMatchIdx = 0;
     int currentContinousFramesPlayed = 0;
-    int maxContFramePlayed = 5;
+    int maxContFramePlayed = 10;
     std::vector<std::string> DBmarkerNames = {"LeftFoot", "RightFoot", "Hips"};
     Eigen::VectorXd accumulatedFrameNum;
     bool runMotionMatching;
     crl::mocap::Controller controller;
     Eigen::VectorXd currentQueryVector;
     bool firstInputGet = false;
+    bool inputGet = false;
 
     // int desiredFPS = 30;
     // double controllerOperateInterval;   // Time interval for controller take and process input
