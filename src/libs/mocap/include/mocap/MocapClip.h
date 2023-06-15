@@ -3,7 +3,7 @@
 #include "mocap/MocapMarkers.h"
 #include "mocap/MocapSkeleton.h"
 #include "mocap/MocapSkeletonState.h"
-#include "omp.h"
+// #include "omp.h"
 
 namespace crl::mocap {
 
