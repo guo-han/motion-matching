@@ -173,7 +173,7 @@ void Model::loadObjModel(const std::string &path) {
                         vertex.normal[i] = attrib.normals[3 * idx.normal_index + i];
                 }
 
-                if (attrib.texcoords.size() > 0) {
+                if (idx.texcoord_index >= 0 && attrib.texcoords.size() > 0) {
                     tinyobj::real_t tx = attrib.texcoords[2 * idx.texcoord_index + 0];
                     tinyobj::real_t ty = attrib.texcoords[2 * idx.texcoord_index + 1];
                     vertex.texCoords = {tx, 1 - ty};
